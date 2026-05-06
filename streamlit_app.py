@@ -775,7 +775,7 @@ else:
                 st.markdown(f'<div class="task-card" style="opacity:0.75;"><div style="display:flex;justify-content:space-between;align-items:center;"><div class="task-title-text">{task["title"]}</div><div style="color:rgba(255,255,255,0.35);font-size:0.85rem;">{task["task_date"]}</div></div><div class="task-time-text">{task["time_slot"]}</div><div class="task-desc-text">{task["description"]}</div></div>', unsafe_allow_html=True)
 
         st.markdown('<div class="section-title">ترتيب العمال اليوم</div>', unsafe_allow_html=True)
-    all_workers      = get_all_workers()
+all_workers      = get_all_workers()
     approved_workers = [w for w in all_workers if w["status"] == "approved"]
     all_completions  = get_all_completions()
     today_str        = now.strftime("%Y-%m-%d")
