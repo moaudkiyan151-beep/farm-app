@@ -699,18 +699,18 @@ st.markdown(f"""
     </div>""", unsafe_allow_html=True)
 
 tasks = get_tasks(worker_id=worker["id"])
-    if not tasks:
-        st.markdown('<div style="background:rgba(82,183,136,0.06);border:2px dashed rgba(82,183,136,0.3);border-radius:20px;padding:48px 32px;text-align:center;"><div style="font-size:1.3rem;font-weight:800;color:#52b788;margin-bottom:8px;">لا توجد مهام معيّنة لك حالياً</div><div style="color:rgba(255,255,255,0.45);">استمتع بوقتك!</div></div>', unsafe_allow_html=True)
-    else:
-        today      = now.strftime("%Y-%m-%d")
-        today_tasks = [t for t in tasks if t["task_date"] == today]
-        other_tasks  = [t for t in tasks if t["task_date"] != today]
-        done_count  = sum(1 for t in today_tasks if is_task_done_by_worker(t["id"], worker["id"]))
-        total_today = len(today_tasks)
+if not tasks:
+st.markdown('<div style="background:rgba(82,183,136,0.06);border:2px dashed rgba(82,183,136,0.3);border-radius:20px;padding:48px 32px;text-align:center;"><div style="font-size:1.3rem;font-weight:800;color:#52b788;margin-bottom:8px;">لا توجد مهام معيّنة لك حالياً</div><div style="color:rgba(255,255,255,0.45);">استمتع بوقتك!</div></div>', unsafe_allow_html=True)
+else:
+today      = now.strftime("%Y-%m-%d")
+today_tasks = [t for t in tasks if t["task_date"] == today]
+other_tasks  = [t for t in tasks if t["task_date"] != today]
+done_count  = sum(1 for t in today_tasks if is_task_done_by_worker(t["id"], worker["id"]))
+total_today = len(today_tasks)
 
-        if total_today > 0:
-            pct = int(done_count / total_today * 100)
-            st.markdown(f"""
+if total_today > 0:
+pct = int(done_count / total_today * 100)
+st.markdown(f"""
             <div style="margin-bottom:24px;">
               <div style="display:flex;gap:12px;margin-bottom:14px;">
                 <div class="stat-card" style="flex:1;"><div class="stat-num">{total_today}</div><div class="stat-label">مهام اليوم</div></div>
