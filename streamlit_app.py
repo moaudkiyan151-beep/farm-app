@@ -674,7 +674,7 @@ def page_worker():
     else: greeting, period = "مساء النور", "مساءً"
 
     if "login_time" not in st.session_state or st.session_state.login_time is None:
-    st.session_state.login_time = now
+        st.session_state.login_time = now
 
 try:
     session_minutes = int((now - st.session_state.login_time).total_seconds() // 60)
