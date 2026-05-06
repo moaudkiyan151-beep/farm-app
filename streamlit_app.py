@@ -667,21 +667,24 @@ def page_worker():
         return
 
     TZ_PLUS1 = timezone(timedelta(hours=1))
-    now  = datetime.now(TZ_PLUS1)
-    hour = now.hour
-    if 5 <= hour < 12: greeting, period = "صباح الخير", "صباحاً"
-    elif 12 <= hour < 20: greeting, period = "مساء الخير", "مساءً"
-    else: greeting, period = "مساء النور", "مساءً"
+now = datetime.now(TZ_PLUS1)
+hour = now.hour
+if 5 <= hour < 12:
+    greeting, period = "صباح الخير", "صباحاً"
+elif 12 <= hour < 20:
+    greeting, period = "مساء الخير", "مساءً"
+else:
+    greeting, period = "مساء النور", "مساءً"
 
-    if "login_time" not in st.session_state or not isinstance(st.session_state.login_time, datetime):
+if "login_time" not in st.session_state or not isinstance(st.session_state.login_time, datetime):
     st.session_state.login_time = now
 session_minutes = int((now - st.session_state.login_time).total_seconds() // 60)
 
-    medals_list = [m.strip() for m in (worker.get("medals","") or "").split(",") if m.strip()]
-    medals_html = "".join([f'<span class="medal-badge">{m}</span>' for m in medals_list])
-    medals_section = f'<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:4px;">{medals_html}</div>' if medals_html else ""
-    first_name   = worker["name"].split()[0]
-    time_display = now.strftime("%I:%M %p").replace("AM","ص").replace("PM","م")
+medals_list = [m.strip() for m in (worker.get("medals", "") or "").split(",") if m.strip()]
+medals_html = "".join([f'<span class="medal-badge">{m}</span>' for m in medals_list])
+medals_section = f'<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:4px;">{medals_html}</div>' if medals_html else ""
+first_name = worker["name"].split()[0]
+time_display = now.strftime("%I:%M %p").replace("AM", "ص").replace("PM", "م")
 
     st.markdown(f"""
     <div class="hero-header">
@@ -807,3 +810,4 @@ elif page == "worker" and st.session_state.get("role") == "worker":
 else:
     st.session_state.page = "login"
     page_login()
+			
