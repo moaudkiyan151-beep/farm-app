@@ -673,7 +673,7 @@ def page_worker():
     elif 12 <= hour < 20: greeting, period = "مساء الخير", "مساءً"
     else: greeting, period = "مساء النور", "مساءً"
 
-   if "login_time" not in st.session_state or not isinstance(st.session_state.login_time, datetime):
+    if "login_time" not in st.session_state or not isinstance(st.session_state.login_time, datetime):
     st.session_state.login_time = now
 session_minutes = int((now - st.session_state.login_time).total_seconds() // 60)
 
