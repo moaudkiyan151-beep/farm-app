@@ -675,7 +675,7 @@ def page_worker():
 
     def safe_session_minutes():
     try:
-        return int((datetime.now() - st.session_state.login_time).total_seconds() // 60)
+    return int((datetime.now() - st.session_state.login_time).total_seconds() // 60)
     except:
         return 0
 
