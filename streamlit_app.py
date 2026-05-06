@@ -353,7 +353,7 @@ def page_login():
                         if worker:
                             st.session_state.user = worker
                             st.session_state.role = "worker"
-                            st.session_state.login_time = datetime.now()
+                            st.session_state.login_time = datetime.now(timezone(timedelta(hours=1)))
                             if worker["status"] == "approved":
                                 st.session_state.page = "worker"
                                 st.rerun()
@@ -376,7 +376,7 @@ def page_login():
                 with col3: reg_exp    = st.number_input("سنوات الخبرة *", min_value=0, max_value=50, value=0, step=1)
                 with col4: reg_skills = st.multiselect("مجالات الخبرة *", skill_options, placeholder="اختر مهاراتك")
                 col5, col6 = st.columns(2)
-                with col5: reg_pass    = st.text_input("كلمة المرور *", type="password", placeholder="6 أحرف على الأقل")
+                with col5: reg_pass    = st.text_input("كلمة المرور *", type="password", placeholder="6 أحرس على الأقل")
                 with col6: reg_confirm = st.text_input("تأكيد كلمة المرور *", type="password", placeholder="أعد الكتابة")
                 reg_submitted = st.form_submit_button("تقديم الطلب", use_container_width=True)
                 if reg_submitted:
@@ -673,8 +673,10 @@ def page_worker():
     elif 12 <= hour < 20: greeting, period = "مساء الخير", "مساءً"
     else: greeting, period = "مساء النور", "مساءً"
 
-    if "login_time" not in st.session_state:
+    # تصليح الخطأ هنا عبر التأكد من أن login_time هو datetime صحيح
+    if "login_time" not in st.session_state or not isinstance(st.session_state.login_time, datetime):
         st.session_state.login_time = now
+    
     session_minutes = int((now - st.session_state.login_time).total_seconds() // 60)
 
     medals_list = [m.strip() for m in (worker.get("medals","") or "").split(",") if m.strip()]
