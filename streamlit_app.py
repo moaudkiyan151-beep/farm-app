@@ -396,11 +396,4 @@ def page_login():
                             <div class="success-banner">
                                 <div style="color:#fff;font-size:1.4rem;font-weight:800;margin-bottom:8px;">أهلاً وسهلاً في مزرعة الشاوية!</div>
                                 <div style="color:#b7e4c7;font-size:0.95rem;margin-bottom:14px;">تم استلام طلبك. سيُراجعه المدير قريباً.</div>
-                                <div style="background:rgba(255,255,255,0.12);border-radius:10px;padding:8px 14px;color:#d8f3dc;font-size:0.88rem;">نتطلع لانضمامك لعائلة المزرعة</div>
-                            </div>""", unsafe_allow_html=True)
-                        else:
-                            st.error(message)
-
-        with tab3:
-            with st.form("admin_login_form"):
-                username    = st.text_input("اسم
+                                <div style="background:rgba(255,255,255,0.12);border-radius:10px;padding:8px 14px;color:#d8f3dc;font-size:0.88rem;">نتطلع لانضمامك لعائلة المزرعة</div
