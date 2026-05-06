@@ -353,8 +353,7 @@ def page_login():
                         if worker:
                             st.session_state.user = worker
                             st.session_state.role = "worker"
-                            # تخزين وقت الدخول كـ "Aware" دائماً
-                            st.session_state.login_time = datetime.now(timezone(timedelta(hours=1)))
+                            st.session_state.login_time = datetime.now()
                             if worker["status"] == "approved":
                                 st.session_state.page = "worker"
                                 st.rerun()
@@ -377,7 +376,7 @@ def page_login():
                 with col3: reg_exp    = st.number_input("سنوات الخبرة *", min_value=0, max_value=50, value=0, step=1)
                 with col4: reg_skills = st.multiselect("مجالات الخبرة *", skill_options, placeholder="اختر مهاراتك")
                 col5, col6 = st.columns(2)
-                with col5: reg_pass    = st.text_input("كلمة المرور *", type="password", placeholder="6 أحرس على الأقل")
+                with col5: reg_pass    = st.text_input("كلمة المرور *", type="password", placeholder="6 أحرف على الأقل")
                 with col6: reg_confirm = st.text_input("تأكيد كلمة المرور *", type="password", placeholder="أعد الكتابة")
                 reg_submitted = st.form_submit_button("تقديم الطلب", use_container_width=True)
                 if reg_submitted:
@@ -656,8 +655,6 @@ def page_admin():
 # ─────────────────────────────────────────────
 def page_worker():
     worker = st.session_state.get("user")
-    
-    # التحقق من حالة العامل
     if worker["status"] == "pending":
         st.warning("طلبك لا يزال قيد المراجعة. ستتمكن من رؤية مهامك بمجرد قبول طلبك.")
         if st.button("تسجيل الخروج", type="secondary"):
@@ -669,30 +666,17 @@ def page_worker():
             st.session_state.clear(); st.rerun()
         return
 
-    # توحيد المنطقة الزمنية (المغرب GMT+1)
     TZ_PLUS1 = timezone(timedelta(hours=1))
-    now = datetime.now(TZ_PLUS1)
-    
-    # ─── حل مشكلة مدة الجلسة (Session Duration) ───
-    if "login_time" not in st.session_state:
-        st.session_state.login_time = now
-    
-    login_time = st.session_state.login_time
-    
-    # التأكد أن كلا الوقتين Awareness متطابقين
-    if login_time.tzinfo is None:
-        login_time = login_time.replace(tzinfo=TZ_PLUS1)
-        
-    diff = now - login_time
-    session_minutes = int(diff.total_seconds() // 60)
-
-    # التحية حسب الوقت
+    now  = datetime.now(TZ_PLUS1)
     hour = now.hour
     if 5 <= hour < 12: greeting, period = "صباح الخير", "صباحاً"
     elif 12 <= hour < 20: greeting, period = "مساء الخير", "مساءً"
     else: greeting, period = "مساء النور", "مساءً"
 
-    # عرض الميداليات
+    if "login_time" not in st.session_state:
+        st.session_state.login_time = now
+    session_minutes = int((now - st.session_state.login_time).total_seconds() // 60)
+
     medals_list = [m.strip() for m in (worker.get("medals","") or "").split(",") if m.strip()]
     medals_html = "".join([f'<span class="medal-badge">{m}</span>' for m in medals_list])
     medals_section = f'<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:4px;">{medals_html}</div>' if medals_html else ""
@@ -711,12 +695,11 @@ def page_worker():
       </div>
     </div>""", unsafe_allow_html=True)
 
-    # عرض المهام
     tasks = get_tasks(worker_id=worker["id"])
     if not tasks:
         st.markdown('<div style="background:rgba(82,183,136,0.06);border:2px dashed rgba(82,183,136,0.3);border-radius:20px;padding:48px 32px;text-align:center;"><div style="font-size:1.3rem;font-weight:800;color:#52b788;margin-bottom:8px;">لا توجد مهام معيّنة لك حالياً</div><div style="color:rgba(255,255,255,0.45);">استمتع بوقتك!</div></div>', unsafe_allow_html=True)
     else:
-        today = now.strftime("%Y-%m-%d")
+        today      = now.strftime("%Y-%m-%d")
         today_tasks = [t for t in tasks if t["task_date"] == today]
         other_tasks  = [t for t in tasks if t["task_date"] != today]
         done_count  = sum(1 for t in today_tasks if is_task_done_by_worker(t["id"], worker["id"]))
@@ -776,13 +759,15 @@ def page_worker():
                         else:
                             if st.button("إلغاء الإنجاز", key=f"undone_{task['id']}_{worker['id']}", use_container_width=True, type="secondary"):
                                 unmark_task_done(task["id"], worker["id"]); st.rerun()
+        else:
+            st.info("لا توجد مهام مجدولة لهذا اليوم.")
 
         if other_tasks:
             st.markdown('<div class="section-title">المهام القادمة</div>', unsafe_allow_html=True)
             for task in other_tasks:
+                is_done = is_task_done_by_worker(task["id"], worker["id"])
                 st.markdown(f'<div class="task-card" style="opacity:0.75;"><div style="display:flex;justify-content:space-between;align-items:center;"><div class="task-title-text">{task["title"]}</div><div style="color:rgba(255,255,255,0.35);font-size:0.85rem;">{task["task_date"]}</div></div><div class="task-time-text">{task["time_slot"]}</div><div class="task-desc-text">{task["description"]}</div></div>', unsafe_allow_html=True)
 
-    # لوحة المتصدرين
     st.markdown('<div class="section-title">ترتيب العمال اليوم</div>', unsafe_allow_html=True)
     all_workers      = get_all_workers()
     approved_workers = [w for w in all_workers if w["status"] == "approved"]
@@ -792,16 +777,20 @@ def page_worker():
     for c in all_completions:
         if c["completed_at"][:10] == today_str:
             today_done_counts[c["worker_id"]] = today_done_counts.get(c["worker_id"], 0) + 1
-    ranked = sorted(approved_workers, key=lambda w: today_done_counts.get(w["id"], 0), reverse=True)
+    ranked      = sorted(approved_workers, key=lambda w: today_done_counts.get(w["id"], 0), reverse=True)
+    rank_labels = ["الأول","الثاني","الثالث"]
     for idx, rw in enumerate(ranked[:10]):
-        label     = ["الأول","الثاني","الثالث"][idx] if idx < 3 else str(idx+1)
+        label     = rank_labels[idx] if idx < 3 else str(idx+1)
         done      = today_done_counts.get(rw["id"], 0)
         highlight = "rank-highlight" if rw["id"] == worker["id"] else ""
         you_badge = '<span class="rank-you">أنت</span>' if rw["id"] == worker["id"] else ""
         st.markdown(f'<div class="rank-row {highlight}"><div class="rank-num">{label}</div><div class="rank-name">{rw["name"]} {you_badge}</div><div class="rank-score">{done} مهمة</div></div>', unsafe_allow_html=True)
 
+    st.markdown("<br>", unsafe_allow_html=True)
     if st.button("تسجيل الخروج", type="secondary", key="worker_logout"):
-        st.session_state.clear(); st.rerun()
+        st.session_state.clear()
+        st.rerun()
+    st.markdown('<div class="footer-text">مزرعة الشاوية — من الفجر حتى الغروب</div>', unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
 #  التوجيه بين الصفحات
@@ -818,26 +807,3 @@ elif page == "worker" and st.session_state.get("role") == "worker":
 else:
     st.session_state.page = "login"
     page_login()
-# ──────────────────────────────────────────────────────────
-# كود الإصلاح التلقائي (أضفه في نهاية الملف)
-# ──────────────────────────────────────────────────────────
-from datetime import datetime
-
-if "login_time" in st.session_state:
-    # نقوم بتحويل وقت الدخول إلى توقيت "سادة" (بدون منطقة زمنية) 
-    # ليتوافق مع datetime.now() الافتراضية ويختفي الخطأ
-    try:
-        if st.session_state.login_time.tzinfo is not None:
-            st.session_state.login_time = st.session_state.login_time.replace(tzinfo=None)
-    except:
-        pass
-
-# إعادة تعريف دالة التحقق من الوقت لتجنب أي تعارض في أجزاء الكود الأخرى
-def safe_now():
-    return datetime.now().replace(tzinfo=None)
-
-# إصلاح أي كائن وقت آخر قد يسبب مشكلة في الجلسة
-for key in st.session_state.keys():
-    if isinstance(st.session_state[key], datetime):
-        st.session_state[key] = st.session_state[key].replace(tzinfo=None)
-# ──────────────────────────────────────────────────────────
