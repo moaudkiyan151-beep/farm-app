@@ -137,5 +137,4 @@ def delete_task(task_id):
     conn = get_connection()
     c = conn.cursor()
     c.execute("DELETE FROM tasks WHERE id=?", (task_id,))
-    c.execute("DELETE FROM task_completions WHERE task_id=?", (task_id,))
-    conn.commit(); conn.close
+    c.execute("DELETE FROM task_complet
