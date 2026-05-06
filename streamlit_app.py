@@ -818,3 +818,26 @@ elif page == "worker" and st.session_state.get("role") == "worker":
 else:
     st.session_state.page = "login"
     page_login()
+# ──────────────────────────────────────────────────────────
+# كود الإصلاح التلقائي (أضفه في نهاية الملف)
+# ──────────────────────────────────────────────────────────
+from datetime import datetime
+
+if "login_time" in st.session_state:
+    # نقوم بتحويل وقت الدخول إلى توقيت "سادة" (بدون منطقة زمنية) 
+    # ليتوافق مع datetime.now() الافتراضية ويختفي الخطأ
+    try:
+        if st.session_state.login_time.tzinfo is not None:
+            st.session_state.login_time = st.session_state.login_time.replace(tzinfo=None)
+    except:
+        pass
+
+# إعادة تعريف دالة التحقق من الوقت لتجنب أي تعارض في أجزاء الكود الأخرى
+def safe_now():
+    return datetime.now().replace(tzinfo=None)
+
+# إصلاح أي كائن وقت آخر قد يسبب مشكلة في الجلسة
+for key in st.session_state.keys():
+    if isinstance(st.session_state[key], datetime):
+        st.session_state[key] = st.session_state[key].replace(tzinfo=None)
+# ──────────────────────────────────────────────────────────
