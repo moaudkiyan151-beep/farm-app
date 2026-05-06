@@ -698,7 +698,7 @@ st.markdown(f"""
       </div>
     </div>""", unsafe_allow_html=True)
 
-    tasks = get_tasks(worker_id=worker["id"])
+tasks = get_tasks(worker_id=worker["id"])
     if not tasks:
         st.markdown('<div style="background:rgba(82,183,136,0.06);border:2px dashed rgba(82,183,136,0.3);border-radius:20px;padding:48px 32px;text-align:center;"><div style="font-size:1.3rem;font-weight:800;color:#52b788;margin-bottom:8px;">لا توجد مهام معيّنة لك حالياً</div><div style="color:rgba(255,255,255,0.45);">استمتع بوقتك!</div></div>', unsafe_allow_html=True)
     else:
