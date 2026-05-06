@@ -680,7 +680,7 @@ try:
     session_minutes = int((now - st.session_state.login_time).total_seconds() // 60)
 except:
     session_minutes = 0
-
+    worker = st.session_state.get("user", {})
 
     medals_list = [m.strip() for m in (worker.get("medals","") or "").split(",") if m.strip()]
     medals_html = "".join([f'<span class="medal-badge">{m}</span>' for m in medals_list])
