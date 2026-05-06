@@ -686,7 +686,7 @@ medals_section = f'<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:4
 first_name = worker["name"].split()[0]
 time_display = now.strftime("%I:%M %p").replace("AM", "ص").replace("PM", "م")
 
-    st.markdown(f"""
+st.markdown(f"""
     <div class="hero-header">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;position:relative;z-index:1;">
         <div>
