@@ -1,107 +1,89 @@
 import streamlit as st
+from datetime import datetime
 
-# إعدادات النسخة الرسمية الفاخرة Farm-App-v1.1
-st.set_page_config(page_title="Farm-App-v1.1", page_icon="🌿", layout="centered")
+# --- إعدادات الصفحة الأصلية ---
+st.set_page_config(page_title="مزرعة الشاوية", page_icon="🚜", layout="wide")
 
-# تصميم CSS "الفاخر" - تغيير شامل للألوان والخطوط
-st.markdown("""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap');
+# --- محاكي قاعدة البيانات ---
+if 'users' not in st.session_state:
+    st.session_state.users = {"admin": {"password": "farm123", "role": "admin"}}
+if 'pending_users' not in st.session_state:
+    st.session_state.pending_users = {}
+if 'worker_data' not in st.session_state:
+    st.session_state.worker_data = {}
+
+# --- وظيفة صفحة العامل (حيث كان الخطأ) ---
+def page_worker():
+    st.title("صفحة العامل")
+    worker_name = st.session_state.get("username")
     
-    html, body, [class*="css"] {
-        font-family: 'Cairo', sans-serif;
-        background-color: #f0f2f6;
-    }
+    if st.button("تسجيل الخروج"):
+        st.session_state.page = "login"
+        st.rerun()
+
+    st.write(f"أهلاً بك يا {worker_name}")
     
-    .stApp {
-        background: linear-gradient(135deg, #111d12 0%, #000000 100%);
-    }
+    # تصليح الخطأ هنا: التأكد من أن القيم وقتية قبل الحساب
+    if st.button("تسجيل بداية العمل"):
+        st.session_state.worker_data[worker_name] = datetime.now()
+        st.success("تم تسجيل وقت البدء.")
 
-    .main-card {
-        background: rgba(255, 255, 255, 0.05);
-        backdrop-filter: blur(10px);
-        padding: 30px;
-        border-radius: 30px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-        margin-bottom: 20px;
-    }
+    if worker_name in st.session_state.worker_data:
+        start_time = st.session_state.worker_data[worker_name]
+        now = datetime.now()
+        # الإصلاح الجذري للسطر 678:
+        duration = now - start_time
+        duration_minutes = int(duration.total_seconds() // 60)
+        st.info(f"أنت تعمل منذ: {duration_minutes} دقيقة")
 
-    .stButton>button {
-        background: linear-gradient(90deg, #4CAF50 0%, #2E7D32 100%);
-        color: white;
-        border: none;
-        border-radius: 15px;
-        font-weight: bold;
-        transition: 0.3s;
-        height: 3.5em;
-    }
-
-    .stButton>button:hover {
-        transform: scale(1.02);
-        box-shadow: 0 5px 15px rgba(76, 175, 80, 0.4);
-    }
-
-    .stTextInput>div>div>input {
-        background-color: rgba(255, 255, 255, 0.07) !important;
-        color: white !important;
-        border-radius: 12px !important;
-        border: 1px solid rgba(255, 255, 255, 0.2) !important;
-    }
-
-    h1 { color: #81c784; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); }
-    </style>
-    """, unsafe_allow_html=True)
-
-# تهيئة البيانات
-if 'workers' not in st.session_state: st.session_state.workers = []
-if 'waiting' not in st.session_state: st.session_state.waiting = []
-
-# واجهة التطبيق
-with st.container():
-    st.markdown("<div class='main-card'>", unsafe_allow_html=True)
-    st.markdown("<h1 style='text-align: center;'>MAZRAAT ASHAWIYA</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #aaa;'>إدارة ذكية • مشروع 0001 • v1.1</p>", unsafe_allow_html=True)
+# --- وظيفة صفحة المدير ---
+def page_admin():
+    st.title("لوحة تحكم المدير")
+    if st.button("تسجيل الخروج"):
+        st.session_state.page = "login"
+        st.rerun()
     
-    tab1, tab2, tab3 = st.tabs(["👤 العمال", "📝 تسجيل", "🔐 المدير"])
+    st.subheader("طلبات الانضمام المعلقة")
+    for user, info in list(st.session_state.pending_users.items()):
+        col1, col2 = st.columns([3, 1])
+        col1.write(f"العامل: {user}")
+        if col2.button("قبول", key=user):
+            st.session_state.users[user] = {"password": info["password"], "role": "worker"}
+            del st.session_state.pending_users[user]
+            st.rerun()
 
+# --- صفحة تسجيل الدخول ---
+def page_login():
+    st.title("مزرعة الشاوية - تسجيل الدخول")
+    
+    tab1, tab2 = st.tabs(["دخول", "تسجيل جديد"])
+    
     with tab1:
-        st.markdown("<br>", unsafe_allow_html=True)
-        user = st.text_input("الاسم الكامل", placeholder="أدخل اسمك هنا")
-        pwd = st.text_input("كلمة المرور", type="password", placeholder="••••••••")
-        if st.button("دخول العمل"):
-            found = next((w for w in st.session_state.workers if w['name'] == user and w['pass'] == pwd), None)
-            if found: st.success(f"مرحباً بك {user}")
-            else: st.error("الحساب غير موجود أو معلق")
-
+        u = st.text_input("اسم المستخدم")
+        p = st.text_input("كلمة المرور", type="password")
+        if st.button("دخول"):
+            if u in st.session_state.users and st.session_state.users[u]["password"] == p:
+                st.session_state.username = u
+                st.session_state.role = st.session_state.users[u]["role"]
+                st.session_state.page = st.session_state.role
+                st.rerun()
+            else:
+                st.error("بيانات خاطئة")
+                
     with tab2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        n_user = st.text_input("اسم جديد")
-        n_pwd = st.text_input("كلمة مرور جديدة", type="password")
-        if st.button("إرسال طلب الانضمام"):
-            if n_user and n_pwd:
-                st.session_state.waiting.append({"name": n_user, "pass": n_pwd})
-                st.info("تم إرسال الطلب للمراجعة")
+        new_u = st.text_input("اسم مستخدم جديد")
+        new_p = st.text_input("كلمة مرور جديدة", type="password")
+        if st.button("إرسال طلب"):
+            st.session_state.pending_users[new_u] = {"password": new_p}
+            st.info("تم إرسال الطلب للمدير")
 
-    with tab3:
-        st.markdown("<br>", unsafe_allow_html=True)
-        adm_u = st.text_input("ID المدير")
-        adm_p = st.text_input("Passcode", type="password")
-        if st.button("دخول لوحة التحكم"):
-            if adm_u == "admin" and adm_p == "farm123":
-                st.session_state.is_adm = True
-            else: st.error("خطأ في البيانات")
+# --- التوجيه بين الصفحات (الأسطر الأخيرة التي أرسلتها في الصورة) ---
+if "page" not in st.session_state:
+    st.session_state.page = "login"
 
-        if st.session_state.get('is_adm'):
-            st.markdown("---")
-            st.markdown("### طلبات جديدة")
-            for i, r in enumerate(st.session_state.waiting):
-                c1, c2 = st.columns([3, 1])
-                c1.write(r['name'])
-                if c2.button("قبول", key=f"a_{i}"):
-                    st.session_state.workers.append(r)
-                    st.session_state.waiting.pop(i)
-                    st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
-
-st.markdown("<p style='text-align: center; color: #555; font-size: 0.7em;'>DESIGNED BY AI FOR ASHAWIYA FARM</p>", unsafe_allow_html=True)
+if st.session_state.page == "admin":
+    page_admin()
+elif st.session_state.page == "worker":
+    page_worker()
+else:
+    page_login()
