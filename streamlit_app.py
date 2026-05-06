@@ -396,4 +396,414 @@ def page_login():
                             <div class="success-banner">
                                 <div style="color:#fff;font-size:1.4rem;font-weight:800;margin-bottom:8px;">أهلاً وسهلاً في مزرعة الشاوية!</div>
                                 <div style="color:#b7e4c7;font-size:0.95rem;margin-bottom:14px;">تم استلام طلبك. سيُراجعه المدير قريباً.</div>
-                                <div style="background:rgba(255,255,255,0.12);border-radius:10px;padding:8px 14px;color:#d8f3dc;font-size:0.88rem;">نتطلع لانضمامك لعائلة المزرعة</div
+                                <div style="background:rgba(255,255,255,0.12);border-radius:10px;padding:8px 14px;color:#d8f3dc;font-size:0.88rem;">نتطلع لانضمامك لعائلة المزرعة</div>
+                            </div>""", unsafe_allow_html=True)
+                        else:
+                            st.error(message)
+
+        with tab3:
+            with st.form("admin_login_form"):
+                username    = st.text_input("اسم المستخدم", placeholder="admin")
+                adm_pass    = st.text_input("كلمة المرور", type="password", placeholder="••••••••")
+                adm_submit  = st.form_submit_button("الدخول كمدير", use_container_width=True)
+                if adm_submit:
+                    admin_user, admin_hash = get_admin_credentials()
+                    if username == admin_user and hash_password(adm_pass) == admin_hash:
+                        st.session_state.user = {"name": "المدير"}
+                        st.session_state.role = "admin"
+                        st.session_state.page = "admin"
+                        st.rerun()
+                    else:
+                        st.error("بيانات المدير غير صحيحة.")
+
+        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('<div class="footer-text">مزرعة الشاوية — من الفجر حتى الغروب</div>', unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────
+#  لوحة تحكم المدير
+# ─────────────────────────────────────────────
+def page_admin():
+    st.markdown("""
+    <div class="page-header">
+        <div>
+            <div class="page-header-title">لوحة تحكم المدير</div>
+            <div class="page-header-sub">إدارة عمال ومهام مزرعة الشاوية</div>
+        </div>
+        <div class="page-badge">مزرعة الشاوية</div>
+    </div>""", unsafe_allow_html=True)
+
+    tab1, tab2, tab3, tab4 = st.tabs(["طلبات العمال", "إدارة المهام", "حالة الإنجاز", "إعدادات الحساب"])
+
+    with tab1:
+        workers  = get_all_workers()
+        pending  = [w for w in workers if w["status"] == "pending"]
+        approved = [w for w in workers if w["status"] == "approved"]
+        rejected = [w for w in workers if w["status"] == "rejected"]
+        col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+        col_m1.metric("إجمالي الطلبات", len(workers))
+        col_m2.metric("قيد المراجعة",   len(pending))
+        col_m3.metric("مقبولون",         len(approved))
+        col_m4.metric("مرفوضون",         len(rejected))
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        status_map   = {"الكل":"all","قيد المراجعة":"pending","مقبول":"approved","مرفوض":"rejected"}
+        filter_label = st.selectbox("تصفية حسب الحالة", list(status_map.keys()), index=0)
+        filter_status = status_map[filter_label]
+        display_workers = workers if filter_status == "all" else [w for w in workers if w["status"] == filter_status]
+
+        if not display_workers:
+            st.info("لا توجد طلبات في هذه الفئة.")
+        else:
+            for w in display_workers:
+                status    = w["status"]
+                status_ar = {"pending":"قيد المراجعة","approved":"مقبول","rejected":"مرفوض"}.get(status, status)
+                pill      = {"pending":"pill-pending","approved":"pill-approved","rejected":"pill-rejected"}.get(status,"")
+                with st.expander(f"{w['name']} — {w['applied_at'][:10]}"):
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.markdown(f"**الاسم:** {w['name']}")
+                        st.markdown(f"**الهاتف:** {w['phone']}")
+                    with c2:
+                        st.markdown(f"**سنوات الخبرة:** {w['experience_years']}")
+                        st.markdown(f"**المهارات:** {w['skills']}")
+                    st.markdown(f"الحالة: <span class='worker-status-pill {pill}'>{status_ar}</span>", unsafe_allow_html=True)
+                    if w.get("notes"): st.info(f"ملاحظات المدير: {w['notes']}")
+
+                    if status == "pending":
+                        note = st.text_input("ملاحظات اختيارية", key=f"notes_{w['id']}", placeholder="مثال: خلفية ممتازة")
+                        ca, cr, _ = st.columns([1,1,3])
+                        with ca:
+                            if st.button("قبول", key=f"approve_{w['id']}", type="primary"):
+                                update_worker_status(w["id"], "approved", note)
+                                st.success(f"تم قبول {w['name']}!"); st.rerun()
+                        with cr:
+                            if st.button("رفض", key=f"reject_{w['id']}", type="secondary"):
+                                update_worker_status(w["id"], "rejected", note)
+                                st.warning(f"تم رفض {w['name']}."); st.rerun()
+
+                    elif status == "approved":
+                        medal_options = ["نجم المزرعة","الأسرع إنجازاً","الأكثر التزاماً",
+                                         "خبير المواشي","خبير المعدات","خبير الري",
+                                         "خبير الدواجن","خبير الألبان","العامل المثالي",
+                                         "الروح الجماعية","الأداء المتميز"]
+                        current_medals = [m.strip() for m in (w.get("medals") or "").split(",") if m.strip()]
+                        st.markdown("**ميداليات المهارات:**")
+                        new_medals = st.multiselect("اختر الميداليات", medal_options,
+                                                    default=[m for m in current_medals if m in medal_options],
+                                                    key=f"medals_{w['id']}")
+                        csm, crv = st.columns(2)
+                        with csm:
+                            if st.button("حفظ الميداليات", key=f"save_medals_{w['id']}", type="primary"):
+                                update_worker_medals(w["id"], ", ".join(new_medals))
+                                st.success("تم حفظ الميداليات!"); st.rerun()
+                        with crv:
+                            if st.button("سحب القبول", key=f"revoke_{w['id']}", type="secondary"):
+                                update_worker_status(w["id"], "pending", ""); st.rerun()
+
+                    elif status == "rejected":
+                        if st.button("إعادة للمراجعة", key=f"reconsider_{w['id']}", type="secondary"):
+                            update_worker_status(w["id"], "pending", ""); st.rerun()
+
+    with tab2:
+        st.markdown('<div class="section-title">إضافة مهمة جديدة</div>', unsafe_allow_html=True)
+        with st.form("add_task_form", clear_on_submit=True):
+            c1, c2 = st.columns(2)
+            with c1: task_title = st.text_input("عنوان المهمة *", placeholder="مثال: رعي الأغنام صباحاً")
+            with c2: task_date  = st.date_input("تاريخ المهمة *", value=date.today())
+            task_desc = st.text_area("الوصف *", placeholder="اشرح ما يجب على العمال فعله...")
+            c3, c4 = st.columns(2)
+            with c3: time_slot = st.text_input("الفترة الزمنية *", placeholder="مثال: 06:00 - 08:00 ص")
+            with c4:
+                approved_ws   = [w for w in get_all_workers() if w["status"] == "approved"]
+                assign_opts   = {"جميع العمال": "all"}
+                for w in approved_ws: assign_opts[w["name"]] = str(w["id"])
+                assigned_label = st.selectbox("تعيين إلى *", list(assign_opts.keys()))
+            task_submitted = st.form_submit_button("إضافة المهمة", use_container_width=True)
+            if task_submitted:
+                errs = []
+                if not task_title.strip(): errs.append("عنوان المهمة مطلوب.")
+                if not task_desc.strip(): errs.append("وصف المهمة مطلوب.")
+                if not time_slot.strip(): errs.append("الفترة الزمنية مطلوبة.")
+                if errs:
+                    for e in errs: st.error(e)
+                else:
+                    add_task(task_title.strip(), task_desc.strip(), time_slot.strip(),
+                             assign_opts[assigned_label], str(task_date))
+                    st.success(f"تمت إضافة المهمة '{task_title}' بنجاح!"); st.rerun()
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown('<div class="section-title">جميع المهام</div>', unsafe_allow_html=True)
+        tasks = get_tasks()
+        if not tasks:
+            st.info("لا توجد مهام بعد.")
+        else:
+            for task in tasks:
+                asgn = task["assigned_to"]
+                asgn_label = "جميع العمال" if asgn == "all" else (get_worker_by_id(int(asgn)) or {}).get("name", f"عامل #{asgn}")
+                completions = get_completions_for_task(task["id"])
+                done_badge  = f"{len(completions)} أنجزوا" if completions else "لم ينجز أحد"
+                with st.expander(f"{task['title']} — {task['time_slot']} | {task['task_date']} | {done_badge}"):
+                    ct1, ct2 = st.columns(2)
+                    with ct1:
+                        st.markdown(f"**الفترة:** {task['time_slot']}")
+                        st.markdown(f"**التاريخ:** {task['task_date']}")
+                    with ct2:
+                        st.markdown(f"**مُعيَّن إلى:** {asgn_label}")
+                    st.markdown(f"**الوصف:** {task['description']}")
+                    if completions:
+                        st.markdown("**منجزون:**")
+                        for c in completions: st.markdown(f"- **{c['name']}** — {c['completed_at']}")
+                    else:
+                        st.caption("لم ينجز أي عامل هذه المهمة بعد.")
+                    if st.button("حذف المهمة", key=f"del_{task['id']}", type="secondary"):
+                        delete_task(task["id"]); st.rerun()
+
+    with tab3:
+        st.markdown('<div class="section-title">نظرة شاملة على الإنجاز</div>', unsafe_allow_html=True)
+        all_completions      = get_all_completions()
+        all_tasks            = get_tasks()
+        all_workers_approved = [w for w in get_all_workers() if w["status"] == "approved"]
+        if not all_workers_approved:
+            st.info("لا يوجد عمال مقبولون حتى الآن.")
+        else:
+            total_tasks = len(all_tasks)
+            cs1, cs2, cs3 = st.columns(3)
+            cs1.metric("إجمالي المهام", total_tasks)
+            cs2.metric("إجمالي الإنجازات", len(all_completions))
+            cs3.metric("مهام أُنجزت", len(set(c["task_id"] for c in all_completions)))
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown('<div class="section-title">إنجاز كل عامل</div>', unsafe_allow_html=True)
+            for w in all_workers_approved:
+                worker_done = [(c["task_title"], c["completed_at"]) for c in all_completions if c["worker_id"] == w["id"]]
+                done_count  = len(worker_done)
+                pct         = int(done_count / total_tasks * 100) if total_tasks > 0 else 0
+                with st.expander(f"{w['name']} — {done_count}/{total_tasks} مهمة ({pct}%)"):
+                    st.markdown(f'<div class="completion-bar-wrap"><div class="completion-bar-fill" style="width:{pct}%;"></div></div><div style="color:#74c69d;font-size:0.85rem;font-weight:700;">{pct}٪ منجز</div>', unsafe_allow_html=True)
+                    if done_count == 0:
+                        st.caption("لم ينجز هذا العامل أي مهمة بعد.")
+                    else:
+                        for title, at in worker_done: st.markdown(f"- **{title}** — {at}")
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown('<div class="section-title">إنجاز كل مهمة</div>', unsafe_allow_html=True)
+            today_str    = datetime.now().strftime("%Y-%m-%d")
+            today_tasks  = [t for t in all_tasks if t["task_date"] == today_str]
+            display_tasks = today_tasks if today_tasks else all_tasks
+            for task in display_tasks:
+                completions = get_completions_for_task(task["id"])
+                done_names  = [c["name"] for c in completions]
+                asgn        = task["assigned_to"]
+                if asgn == "all":
+                    eligible = all_workers_approved
+                else:
+                    ew = get_worker_by_id(int(asgn))
+                    eligible = [ew] if ew else []
+                total_el = len(eligible)
+                done_c   = len(done_names)
+                pct      = int(done_c / total_el * 100) if total_el > 0 else 0
+                label    = "مكتملة" if done_c == total_el and total_el > 0 else ("جارية" if done_c > 0 else "معلقة")
+                with st.expander(f"{task['title']} — {done_c}/{total_el} ({pct}%) — {label}"):
+                    st.markdown(f'<div class="completion-bar-wrap"><div class="completion-bar-fill" style="width:{pct}%;"></div></div>', unsafe_allow_html=True)
+                    st.markdown(f"**{task['time_slot']}** | **{task['task_date']}**")
+                    if done_names:
+                        st.markdown("**أنجزوا:**")
+                        for name in done_names:
+                            ct = next((c["completed_at"] for c in completions if c["name"] == name), "")
+                            st.markdown(f"- {name} — {ct}")
+                    pending_names = [w["name"] for w in eligible if w["name"] not in done_names]
+                    if pending_names:
+                        st.markdown("**لم ينجزوا بعد:**")
+                        for name in pending_names: st.markdown(f"- {name}")
+
+    with tab4:
+        st.markdown('<div class="section-title">تغيير بيانات المدير</div>', unsafe_allow_html=True)
+        current_admin_user, _ = get_admin_credentials()
+        st.info(f"اسم المستخدم الحالي: **{current_admin_user}**")
+        with st.form("change_credentials_form", clear_on_submit=True):
+            current_pass = st.text_input("كلمة المرور الحالية *", type="password", placeholder="للتحقق من هويتك")
+            c1, c2 = st.columns(2)
+            with c1: new_username = st.text_input("اسم المستخدم الجديد", placeholder="اتركه فارغاً للإبقاء على الحالي")
+            with c2: new_pass     = st.text_input("كلمة المرور الجديدة *", type="password", placeholder="6 أحرف على الأقل")
+            confirm_new = st.text_input("تأكيد كلمة المرور الجديدة *", type="password", placeholder="أعد الكتابة")
+            save_btn = st.form_submit_button("حفظ التغييرات", use_container_width=True)
+            if save_btn:
+                errors = []
+                if not current_pass: errors.append("كلمة المرور الحالية مطلوبة.")
+                elif not verify_admin_password(current_pass): errors.append("كلمة المرور الحالية غير صحيحة.")
+                if not new_pass: errors.append("كلمة المرور الجديدة مطلوبة.")
+                elif len(new_pass) < 6: errors.append("كلمة المرور يجب أن تكون 6 أحرف على الأقل.")
+                elif new_pass != confirm_new: errors.append("كلمتا المرور الجديدة غير متطابقتين.")
+                if errors:
+                    for e in errors: st.error(e)
+                else:
+                    final_user = new_username.strip() if new_username.strip() else current_admin_user
+                    update_admin_credentials(final_user, new_pass)
+                    st.success("تم تحديث بيانات الدخول بنجاح!")
+                    st.warning("ستحتاج إلى تسجيل الدخول مجدداً بالبيانات الجديدة.")
+                    st.rerun()
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("تسجيل الخروج", type="secondary", key="admin_logout"):
+        st.session_state.user = None
+        st.session_state.role = None
+        st.session_state.page = "login"
+        st.rerun()
+    st.markdown('<div class="footer-text">مزرعة الشاوية — من الفجر حتى الغروب</div>', unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────
+#  لوحة مهام العامل
+# ─────────────────────────────────────────────
+def page_worker():
+    worker = st.session_state.get("user")
+    if worker["status"] == "pending":
+        st.warning("طلبك لا يزال قيد المراجعة. ستتمكن من رؤية مهامك بمجرد قبول طلبك.")
+        if st.button("تسجيل الخروج", type="secondary"):
+            st.session_state.clear(); st.rerun()
+        return
+    elif worker["status"] == "rejected":
+        st.error("طلبك لم يُقبل. يرجى التواصل مع مدير المزرعة.")
+        if st.button("تسجيل الخروج", type="secondary"):
+            st.session_state.clear(); st.rerun()
+        return
+
+    TZ_PLUS1 = timezone(timedelta(hours=1))
+    now  = datetime.now(TZ_PLUS1)
+    hour = now.hour
+    if 5 <= hour < 12: greeting, period = "صباح الخير", "صباحاً"
+    elif 12 <= hour < 20: greeting, period = "مساء الخير", "مساءً"
+    else: greeting, period = "مساء النور", "مساءً"
+
+   if "login_time" not in st.session_state or not isinstance(st.session_state.login_time, datetime):
+    st.session_state.login_time = now
+session_minutes = int((now - st.session_state.login_time).total_seconds() // 60)
+
+    medals_list = [m.strip() for m in (worker.get("medals","") or "").split(",") if m.strip()]
+    medals_html = "".join([f'<span class="medal-badge">{m}</span>' for m in medals_list])
+    medals_section = f'<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:4px;">{medals_html}</div>' if medals_html else ""
+    first_name   = worker["name"].split()[0]
+    time_display = now.strftime("%I:%M %p").replace("AM","ص").replace("PM","م")
+
+    st.markdown(f"""
+    <div class="hero-header">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;position:relative;z-index:1;">
+        <div>
+          <div class="worker-name">{greeting}، {first_name}</div>
+          <div class="worker-sub">مرحباً بك في لوحة مهامك — {period}</div>
+          {medals_section}
+        </div>
+        <div><div class="live-clock">{time_display}</div></div>
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+    tasks = get_tasks(worker_id=worker["id"])
+    if not tasks:
+        st.markdown('<div style="background:rgba(82,183,136,0.06);border:2px dashed rgba(82,183,136,0.3);border-radius:20px;padding:48px 32px;text-align:center;"><div style="font-size:1.3rem;font-weight:800;color:#52b788;margin-bottom:8px;">لا توجد مهام معيّنة لك حالياً</div><div style="color:rgba(255,255,255,0.45);">استمتع بوقتك!</div></div>', unsafe_allow_html=True)
+    else:
+        today      = now.strftime("%Y-%m-%d")
+        today_tasks = [t for t in tasks if t["task_date"] == today]
+        other_tasks  = [t for t in tasks if t["task_date"] != today]
+        done_count  = sum(1 for t in today_tasks if is_task_done_by_worker(t["id"], worker["id"]))
+        total_today = len(today_tasks)
+
+        if total_today > 0:
+            pct = int(done_count / total_today * 100)
+            st.markdown(f"""
+            <div style="margin-bottom:24px;">
+              <div style="display:flex;gap:12px;margin-bottom:14px;">
+                <div class="stat-card" style="flex:1;"><div class="stat-num">{total_today}</div><div class="stat-label">مهام اليوم</div></div>
+                <div class="stat-card" style="flex:1;"><div class="stat-num" style="color:#52b788;">{done_count}</div><div class="stat-label">تم الإنجاز</div></div>
+                <div class="stat-card" style="flex:1;"><div class="stat-num" style="color:#f0a500;">{total_today-done_count}</div><div class="stat-label">متبقية</div></div>
+                <div class="stat-card" style="flex:1;"><div class="stat-num" style="color:rgba(255,255,255,0.5);font-size:1.5rem;">{session_minutes}د</div><div class="stat-label">مدة الجلسة</div></div>
+              </div>
+              <div class="progress-wrap"><div class="progress-fill" style="width:{pct}%;"></div></div>
+              <div style="display:flex;justify-content:space-between;color:#74c69d;font-size:0.85rem;font-weight:700;"><span>{pct}٪ منجز</span><span>{done_count} من {total_today}</span></div>
+            </div>""", unsafe_allow_html=True)
+
+        def parse_task_hour(time_slot):
+            seg = time_slot.split("-")[0].strip()
+            m = re.search(r'(\d{1,2}):(\d{2})', seg)
+            if not m: return None
+            h = int(m.group(1))
+            if "ص" in seg: h = 0 if h == 12 else h
+            elif "م" in seg or "م" in time_slot: h = h + 12 if h < 12 else h
+            return h
+
+        day_names = {"Monday":"الاثنين","Tuesday":"الثلاثاء","Wednesday":"الأربعاء",
+                     "Thursday":"الخميس","Friday":"الجمعة","Saturday":"السبت","Sunday":"الأحد"}
+        month_names = {"January":"يناير","February":"فبراير","March":"مارس","April":"أبريل",
+                       "May":"مايو","June":"يونيو","July":"يوليو","August":"أغسطس",
+                       "September":"سبتمبر","October":"أكتوبر","November":"نوفمبر","December":"ديسمبر"}
+        date_ar = f"{day_names.get(now.strftime('%A'),'')}، {now.day} {month_names.get(now.strftime('%B'),'')} {now.year}"
+
+        if today_tasks:
+            st.markdown(f'<div class="section-title">مهام اليوم — {date_ar}</div>', unsafe_allow_html=True)
+            cols_per_row = 2
+            for i in range(0, len(today_tasks), cols_per_row):
+                row_tasks = today_tasks[i:i+cols_per_row]
+                cols = st.columns(cols_per_row)
+                for j, task in enumerate(row_tasks):
+                    with cols[j]:
+                        is_done    = is_task_done_by_worker(task["id"], worker["id"])
+                        task_hour  = parse_task_hour(task["time_slot"])
+                        is_current = task_hour is not None and abs(task_hour - hour) <= 1
+                        if is_done:
+                            cc, bh, dh = "task-card task-card-done", '<span class="badge badge-done">منجزة</span>', f'<div class="task-desc-done">{task["description"]}</div>'
+                        elif is_current:
+                            cc, bh, dh = "task-card task-card-now", '<span class="badge badge-now">جارية الآن</span>', f'<div class="task-desc-text">{task["description"]}</div>'
+                        else:
+                            cc, bh, dh = "task-card", "", f'<div class="task-desc-text">{task["description"]}</div>'
+                        st.markdown(f'<div class="{cc}"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;"><div class="task-title-text">{task["title"]}</div>{bh}</div><div class="task-time-text">{task["time_slot"]}</div>{dh}</div>', unsafe_allow_html=True)
+                        if not is_done:
+                            if st.button("تحديد كمنجز", key=f"done_{task['id']}_{worker['id']}", use_container_width=True, type="primary"):
+                                mark_task_done(task["id"], worker["id"]); st.rerun()
+                        else:
+                            if st.button("إلغاء الإنجاز", key=f"undone_{task['id']}_{worker['id']}", use_container_width=True, type="secondary"):
+                                unmark_task_done(task["id"], worker["id"]); st.rerun()
+        else:
+            st.info("لا توجد مهام مجدولة لهذا اليوم.")
+
+        if other_tasks:
+            st.markdown('<div class="section-title">المهام القادمة</div>', unsafe_allow_html=True)
+            for task in other_tasks:
+                is_done = is_task_done_by_worker(task["id"], worker["id"])
+                st.markdown(f'<div class="task-card" style="opacity:0.75;"><div style="display:flex;justify-content:space-between;align-items:center;"><div class="task-title-text">{task["title"]}</div><div style="color:rgba(255,255,255,0.35);font-size:0.85rem;">{task["task_date"]}</div></div><div class="task-time-text">{task["time_slot"]}</div><div class="task-desc-text">{task["description"]}</div></div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="section-title">ترتيب العمال اليوم</div>', unsafe_allow_html=True)
+    all_workers      = get_all_workers()
+    approved_workers = [w for w in all_workers if w["status"] == "approved"]
+    all_completions  = get_all_completions()
+    today_str        = now.strftime("%Y-%m-%d")
+    today_done_counts = {}
+    for c in all_completions:
+        if c["completed_at"][:10] == today_str:
+            today_done_counts[c["worker_id"]] = today_done_counts.get(c["worker_id"], 0) + 1
+    ranked      = sorted(approved_workers, key=lambda w: today_done_counts.get(w["id"], 0), reverse=True)
+    rank_labels = ["الأول","الثاني","الثالث"]
+    for idx, rw in enumerate(ranked[:10]):
+        label     = rank_labels[idx] if idx < 3 else str(idx+1)
+        done      = today_done_counts.get(rw["id"], 0)
+        highlight = "rank-highlight" if rw["id"] == worker["id"] else ""
+        you_badge = '<span class="rank-you">أنت</span>' if rw["id"] == worker["id"] else ""
+        st.markdown(f'<div class="rank-row {highlight}"><div class="rank-num">{label}</div><div class="rank-name">{rw["name"]} {you_badge}</div><div class="rank-score">{done} مهمة</div></div>', unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("تسجيل الخروج", type="secondary", key="worker_logout"):
+        st.session_state.clear()
+        st.rerun()
+    st.markdown('<div class="footer-text">مزرعة الشاوية — من الفجر حتى الغروب</div>', unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────
+#  التوجيه بين الصفحات
+# ─────────────────────────────────────────────
+if "page" not in st.session_state:
+    st.session_state.page = "login"
+
+page = st.session_state.get("page", "login")
+
+if page == "admin" and st.session_state.get("role") == "admin":
+    page_admin()
+elif page == "worker" and st.session_state.get("role") == "worker":
+    page_worker()
+else:
+    st.session_state.page = "login"
+    page_login()
