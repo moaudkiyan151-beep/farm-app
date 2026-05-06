@@ -673,14 +673,9 @@ def page_worker():
     elif 12 <= hour < 20: greeting, period = "مساء الخير", "مساءً"
     else: greeting, period = "مساء النور", "مساءً"
 
-    # التعديل الوحيد: التحقق من وجود # تأكد من أن login_time هو datetime صالح
-if not isinstance(st.session_state.get("login_time"), datetime):
+    if not isinstance(st.session_state.get("login_time"), datetime):
     st.session_state.login_time = now
-try:
-    session_minutes = int((now - st.session_state.login_time).total_seconds() // 60)
-except (TypeError, AttributeError):
-    st.session_state.login_time = now
-    session_minutes = 0
+session_minutes = int((now - st.session_state.login_time).total_seconds() // 60)
 
     medals_list = [m.strip() for m in (worker.get("medals","") or "").split(",") if m.strip()]
     medals_html = "".join([f'<span class="medal-badge">{m}</span>' for m in medals_list])
