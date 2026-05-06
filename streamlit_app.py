@@ -681,12 +681,13 @@ try:
 except:
     session_minutes = 0
     worker = st.session_state.get("user", {})
-
-    medals_list = [m.strip() for m in (worker.get("medals","") or "").split(",") if m.strip()]
+        worker = st.session_state.get("user", {})
+    medals_list = [m.strip() for m in (worker.get("medals", "") or "").split(",") if m.strip()]
     medals_html = "".join([f'<span class="medal-badge">{m}</span>' for m in medals_list])
     medals_section = f'<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:4px;">{medals_html}</div>' if medals_html else ""
     first_name = worker.get("name", "مستخدم").split()[0]
     time_display = now.strftime("%I:%M %p").replace("AM", "ص").replace("PM", "م")
+
     st.markdown(f"""
     <div class="hero-header">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;position:relative;z-index:1;">
