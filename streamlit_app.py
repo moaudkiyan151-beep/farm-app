@@ -313,6 +313,26 @@ div[data-testid="stForm"] { background:transparent !important; border:none !impo
 </style>
 """, unsafe_allow_html=True)
 
+components.html("""<script>
+(function(){
+  var SELECTORS=[
+    '[data-testid="stToolbar"]','[data-testid="stDecoration"]',
+    '[data-testid="stStatusWidget"]','[data-testid="manage-app-button"]',
+    '#MainMenu','.viewerBadge_container__1QSob','.viewerBadge_link__qRIco',
+    'a[href*="streamlit.io"]','img[alt="Streamlit"]','button[title="Deploy"]'
+  ];
+  function hide(){
+    var doc=window.parent.document;
+    SELECTORS.forEach(function(s){
+      doc.querySelectorAll(s).forEach(function(el){el.style.setProperty('display','none','important');});
+    });
+  }
+  hide();
+  var obs=new MutationObserver(hide);
+  obs.observe(window.parent.document.body,{childList:true,subtree:true});
+})();
+</script>""", height=0)
+
 def worker_hero_clock():
     _tz = timezone(timedelta(hours=1))
     _now = datetime.now(_tz)
