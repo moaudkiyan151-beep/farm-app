@@ -5,7 +5,6 @@ import hashlib
 import os
 import re
 from datetime import datetime, date, timezone, timedelta
-from streamlit_autorefresh import st_autorefresh
 
 # ─────────────────────────────────────────────
 #  قاعدة البيانات
@@ -686,7 +685,6 @@ def page_admin():
 #  لوحة مهام العامل
 # ─────────────────────────────────────────────
 def page_worker():
-    st_autorefresh(interval=60000, key="worker_clock_refresh")
     worker = st.session_state.get("user")
     if worker["status"] == "pending":
         st.warning("طلبك لا يزال قيد المراجعة. ستتمكن من رؤية مهامك بمجرد قبول طلبك.")
