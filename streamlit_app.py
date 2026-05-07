@@ -303,6 +303,17 @@ div[data-testid="stForm"] { background:transparent !important; border:none !impo
 </style>
 """, unsafe_allow_html=True)
 
+@st.fragment(run_every=60)
+def worker_hero_clock(first_name, medals_section):
+    _tz = timezone(timedelta(hours=1))
+    _now = datetime.now(_tz)
+    _h = _now.hour
+    if 5 <= _h < 12: _gr, _pr = "صباح الخير", "صباحاً"
+    elif 12 <= _h < 20: _gr, _pr = "مساء الخير", "مساءً"
+    else: _gr, _pr = "مساء النور", "مساءً"
+    _t = _now.strftime("%I:%M %p").replace("AM","ص").replace("PM","م")
+    st.markdown(f'<div class="hero-header"><div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;"><div><div class="worker-name">{_gr}، {first_name}</div><div class="worker-sub">مرحباً بك في لوحة مهامك — {_pr}</div>{medals_section}</div><div><div class="live-clock">{_t}</div></div></div></div>', unsafe_allow_html=True)
+
 # ─────────────────────────────────────────────
 #  صفحة تسجيل الدخول
 # ─────────────────────────────────────────────
@@ -353,7 +364,7 @@ def page_login():
                         if worker:
                             st.session_state.user = worker
                             st.session_state.role = "worker"
-                            st.session_state.login_time = datetime.now()
+                            st.session_state.login_time = datetime.now(timezone(timedelta(hours=1)))
                             if worker["status"] == "approved":
                                 st.session_state.page = "worker"
                                 st.rerun()
@@ -673,32 +684,16 @@ def page_worker():
     elif 12 <= hour < 20: greeting, period = "مساء الخير", "مساءً"
     else: greeting, period = "مساء النور", "مساءً"
 
-    if "login_time" not in st.session_state or st.session_state.login_time is None:
+    if "login_time" not in st.session_state:
         st.session_state.login_time = now
-
-    try:
-        session_minutes = int((now - st.session_state.login_time).total_seconds() // 60)
-    except:
-        session_minutes = 0
-
+    session_minutes = int((now - st.session_state.login_time).total_seconds() // 60)
 
     medals_list = [m.strip() for m in (worker.get("medals","") or "").split(",") if m.strip()]
     medals_html = "".join([f'<span class="medal-badge">{m}</span>' for m in medals_list])
     medals_section = f'<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:4px;">{medals_html}</div>' if medals_html else ""
-    first_name   = worker["name"].split()[0]
-    time_display = now.strftime("%I:%M %p").replace("AM","ص").replace("PM","م")
+    first_name = worker["name"].split()[0]
 
-    st.markdown(f"""
-    <div class="hero-header">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;position:relative;z-index:1;">
-        <div>
-          <div class="worker-name">{greeting}، {first_name}</div>
-          <div class="worker-sub">مرحباً بك في لوحة مهامك — {period}</div>
-          {medals_section}
-        </div>
-        <div><div class="live-clock">{time_display}</div></div>
-      </div>
-    </div>""", unsafe_allow_html=True)
+    worker_hero_clock(first_name, medals_section)
 
     tasks = get_tasks(worker_id=worker["id"])
     if not tasks:
@@ -812,3 +807,4 @@ elif page == "worker" and st.session_state.get("role") == "worker":
 else:
     st.session_state.page = "login"
     page_login()
+
