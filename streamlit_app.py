@@ -206,6 +206,12 @@ html, body, [class*="css"] { font-family: 'Tajawal', sans-serif !important; dire
 #MainMenu { display: none !important; }
 [data-testid="stToolbar"] { display: none !important; }
 [data-testid="stDecoration"] { display: none !important; }
+[data-testid="stStatusWidget"] { display: none !important; }
+[data-testid="manage-app-button"] { display: none !important; }
+.viewerBadge_container__1QSob { display: none !important; }
+.viewerBadge_link__qRIco { display: none !important; }
+#stDecoration { display: none !important; }
+header[data-testid="stHeader"] { display: none !important; }
 [data-testid="stSidebar"] { display: none !important; }
 [data-testid="InputInstructions"] { display: none !important; }
 footer { display: none; }
