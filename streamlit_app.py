@@ -1,9 +1,11 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import sqlite3
 import hashlib
 import os
 import re
 from datetime import datetime, date, timezone, timedelta
+from streamlit_autorefresh import st_autorefresh
 
 # ─────────────────────────────────────────────
 #  قاعدة البيانات
@@ -202,6 +204,9 @@ st.markdown("""
 html, body, [class*="css"] { font-family: 'Tajawal', sans-serif !important; direction: rtl; text-align: right; }
 [data-testid="stAppViewContainer"] { background: linear-gradient(160deg, #0a1a10 0%, #0d2b1e 50%, #0a1a10 100%); min-height: 100vh; }
 [data-testid="stHeader"] { background: transparent !important; }
+#MainMenu { display: none !important; }
+[data-testid="stToolbar"] { display: none !important; }
+[data-testid="stDecoration"] { display: none !important; }
 [data-testid="stSidebar"] { display: none !important; }
 [data-testid="InputInstructions"] { display: none !important; }
 footer { display: none; }
@@ -303,16 +308,32 @@ div[data-testid="stForm"] { background:transparent !important; border:none !impo
 </style>
 """, unsafe_allow_html=True)
 
-@st.fragment(run_every=60)
-def worker_hero_clock(first_name, medals_section):
+def worker_hero_clock():
     _tz = timezone(timedelta(hours=1))
     _now = datetime.now(_tz)
     _h = _now.hour
     if 5 <= _h < 12: _gr, _pr = "صباح الخير", "صباحاً"
     elif 12 <= _h < 20: _gr, _pr = "مساء الخير", "مساءً"
     else: _gr, _pr = "مساء النور", "مساءً"
-    _t = _now.strftime("%I:%M %p").replace("AM","ص").replace("PM","م")
-    st.markdown(f'<div class="hero-header"><div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;"><div><div class="worker-name">{_gr}، {first_name}</div><div class="worker-sub">مرحباً بك في لوحة مهامك — {_pr}</div>{medals_section}</div><div><div class="live-clock">{_t}</div></div></div></div>', unsafe_allow_html=True)
+    _first_name = st.session_state.get("clock_first_name", "")
+    _medals_section = st.session_state.get("clock_medals_section", "")
+    st.markdown(f'<div class="hero-header"><div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;"><div><div class="worker-name">{_gr}، {_first_name}</div><div class="worker-sub">مرحباً بك في لوحة مهامك — {_pr}</div>{_medals_section}</div><div id="js-clock-wrap"></div></div></div>', unsafe_allow_html=True)
+    components.html("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@800&display=swap');
+html,body{margin:0;padding:0;background:transparent;}
+#clk{background:rgba(255,255,255,0.12);border:1px solid rgba(82,183,136,0.25);border-radius:14px;padding:10px 20px;color:#fff;font-size:1.15rem;font-weight:800;letter-spacing:1px;font-family:'Tajawal',sans-serif;display:inline-block;}
+</style>
+<div id="clk"></div>
+<script>
+function tick(){
+  var n=new Date(),h=n.getHours(),m=n.getMinutes();
+  var ap=h>=12?'\u0645':'\u0635';
+  h=h%12||12;
+  document.getElementById('clk').innerText=String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+' '+ap;
+}
+tick();setInterval(tick,1000);
+</script>""", height=52)
 
 # ─────────────────────────────────────────────
 #  صفحة تسجيل الدخول
@@ -665,6 +686,7 @@ def page_admin():
 #  لوحة مهام العامل
 # ─────────────────────────────────────────────
 def page_worker():
+    st_autorefresh(interval=60000, key="worker_clock_refresh")
     worker = st.session_state.get("user")
     if worker["status"] == "pending":
         st.warning("طلبك لا يزال قيد المراجعة. ستتمكن من رؤية مهامك بمجرد قبول طلبك.")
@@ -692,8 +714,10 @@ def page_worker():
     medals_html = "".join([f'<span class="medal-badge">{m}</span>' for m in medals_list])
     medals_section = f'<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:4px;">{medals_html}</div>' if medals_html else ""
     first_name = worker["name"].split()[0]
+    st.session_state["clock_first_name"] = first_name
+    st.session_state["clock_medals_section"] = medals_section
 
-    worker_hero_clock(first_name, medals_section)
+    worker_hero_clock()
 
     tasks = get_tasks(worker_id=worker["id"])
     if not tasks:
