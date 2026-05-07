@@ -775,28 +775,33 @@ else:
                 st.markdown(f'<div class="task-card" style="opacity:0.75;"><div style="display:flex;justify-content:space-between;align-items:center;"><div class="task-title-text">{task["title"]}</div><div style="color:rgba(255,255,255,0.35);font-size:0.85rem;">{task["task_date"]}</div></div><div class="task-time-text">{task["time_slot"]}</div><div class="task-desc-text">{task["description"]}</div></div>', unsafe_allow_html=True)
 
         st.markdown('<div class="section-title">ترتيب العمال اليوم</div>', unsafe_allow_html=True)
-all_workers      = get_all_workers()
-    approved_workers = [w for w in all_workers if w["status"] == "approved"]
-    all_completions  = get_all_completions()
-    today_str        = now.strftime("%Y-%m-%d")
-    today_done_counts = {}
-    for c in all_completions:
-        if c["completed_at"][:10] == today_str:
-            today_done_counts[c["worker_id"]] = today_done_counts.get(c["worker_id"], 0) + 1
-    ranked      = sorted(approved_workers, key=lambda w: today_done_counts.get(w["id"], 0), reverse=True)
-    rank_labels = ["الأول","الثاني","الثالث"]
-    for idx, rw in enumerate(ranked[:10]):
-        label     = rank_labels[idx] if idx < 3 else str(idx+1)
-        done      = today_done_counts.get(rw["id"], 0)
-        highlight = "rank-highlight" if rw["id"] == worker["id"] else ""
-        you_badge = '<span class="rank-you">أنت</span>' if rw["id"] == worker["id"] else ""
-        st.markdown(f'<div class="rank-row {highlight}"><div class="rank-num">{label}</div><div class="rank-name">{rw["name"]} {you_badge}</div><div class="rank-score">{done} مهمة</div></div>', unsafe_allow_html=True)
+all_workers = get_all_workers()
+approved_workers = [w for w in all_workers if w["status"] == "approved"]
+all_completions = get_all_completions()
+today_str = now.strftime("%Y-%m-%d")
+today_done_counts = {}
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("تسجيل الخروج", type="secondary", key="worker_logout"):
-        st.session_state.clear()
-        st.rerun()
-    st.markdown('<div class="footer-text">مزرعة الشاوية — من الفجر حتى الغروب</div>', unsafe_allow_html=True)
+for c in all_completions:
+    if c["completed_at"][:10] == today_str:
+        today_done_counts[c["worker_id"]] = today_done_counts.get(c["worker_id"], 0) + 1
+
+ranked = sorted(approved_workers, key=lambda w: today_done_counts.get(w["id"], 0), reverse=True)
+rank_labels = ["الأول","الثاني","الثالث"]
+
+for idx, rw in enumerate(ranked[:10]):
+    label = rank_labels[idx] if idx < 3 else str(idx+1)
+    done = today_done_counts.get(rw["id"], 0)
+    highlight = "rank-highlight" if rw["id"] == worker["id"] else ""
+    you_badge = '<span class="rank-you">أنت</span>' if rw["id"] == worker["id"] else ""
+    st.markdown(f'<div class="rank-row {highlight}"><div class="rank-num">{label}</div><div class="rank-name">{rw["name"]} {you_badge}</div><div class="rank-score">{done} مهمة</div></div>', unsafe_allow_html=True)
+
+st.markdown("<br>", unsafe_allow_html=True)
+if st.button("تسجيل الخروج", type="secondary", key="worker_logout"):
+    st.session_state.clear()
+    st.rerun()
+
+st.markdown('<div class="footer-text">مزرعة الشاوية — من الفجر حتى الغروب</div>', unsafe_allow_html=True)
+
 
 # ─────────────────────────────────────────────
 #  التوجيه بين الصفحات
