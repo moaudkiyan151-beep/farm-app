@@ -677,7 +677,7 @@ def page_worker():
         st.session_state.login_time = now
 
     try:
-    session_minutes = int((now - st.session_state.login_time).total_seconds() // 60)
+        session_minutes = int((now - st.session_state.login_time).total_seconds() // 60)
     except:
         session_minutes = 0
 
