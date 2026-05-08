@@ -32,7 +32,8 @@ def init_db():
     c.execute("""CREATE TABLE IF NOT EXISTS tasks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL, description TEXT NOT NULL,
-        time_slot TEXT NOT NULL, assigned_to TEXT NOT NULL DEFAULT 'all',
+        time_slot TEXT NOT NULL DEFAULT '',
+        assigned_to TEXT NOT NULL DEFAULT 'all',
         task_date TEXT NOT NULL, created_at TEXT NOT NULL,
         duration_minutes INTEGER DEFAULT 0)""")
     c.execute("""CREATE TABLE IF NOT EXISTS task_completions (
@@ -59,6 +60,7 @@ def init_db():
         quantity REAL NOT NULL DEFAULT 0,
         unit TEXT NOT NULL DEFAULT 'كجم',
         low_threshold REAL NOT NULL DEFAULT 50,
+        daily_consumption REAL NOT NULL DEFAULT 0,
         updated_at TEXT NOT NULL)""")
     c.execute("""CREATE TABLE IF NOT EXISTS daily_finances (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,14 +69,25 @@ def init_db():
         amount REAL NOT NULL,
         entry_type TEXT NOT NULL DEFAULT 'manual',
         created_at TEXT NOT NULL)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS livestock_animals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        animal_number TEXT UNIQUE NOT NULL,
+        animal_type TEXT NOT NULL,
+        age_months INTEGER DEFAULT 0,
+        notes TEXT DEFAULT '',
+        registered_at TEXT NOT NULL)""")
+
     c.execute("SELECT value FROM settings WHERE key='admin_username'")
     if not c.fetchone():
         c.execute("INSERT INTO settings VALUES ('admin_username','admin')")
         c.execute("INSERT INTO settings VALUES ('admin_password',?)", (hash_password("farm123"),))
+
     for col_sql in [
         "ALTER TABLE workers ADD COLUMN medals TEXT DEFAULT ''",
         "ALTER TABLE workers ADD COLUMN raw_password TEXT DEFAULT ''",
         "ALTER TABLE tasks ADD COLUMN duration_minutes INTEGER DEFAULT 0",
+        "ALTER TABLE tasks ADD COLUMN time_slot TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE feed_inventory ADD COLUMN daily_consumption REAL NOT NULL DEFAULT 0",
     ]:
         try: c.execute(col_sql)
         except: pass
@@ -95,6 +108,17 @@ def update_admin_credentials(new_username, new_password):
     conn = get_connection(); c = conn.cursor()
     c.execute("UPDATE settings SET value=? WHERE key='admin_username'", (new_username,))
     c.execute("UPDATE settings SET value=? WHERE key='admin_password'", (hash_password(new_password),))
+    conn.commit(); conn.close()
+
+def get_setting(key, default=""):
+    conn = get_connection(); c = conn.cursor()
+    c.execute("SELECT value FROM settings WHERE key=?", (key,))
+    row = c.fetchone(); conn.close()
+    return row["value"] if row else default
+
+def set_setting(key, value):
+    conn = get_connection(); c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", (key, value))
     conn.commit(); conn.close()
 
 # ── العمال ──
@@ -146,16 +170,16 @@ def get_worker_by_id(worker_id):
 def get_tasks(worker_id=None):
     conn = get_connection(); c = conn.cursor()
     if worker_id:
-        c.execute("SELECT * FROM tasks WHERE assigned_to='all' OR assigned_to=? ORDER BY time_slot",
+        c.execute("SELECT * FROM tasks WHERE assigned_to='all' OR assigned_to=? ORDER BY task_date,created_at",
                   (str(worker_id),))
     else:
-        c.execute("SELECT * FROM tasks ORDER BY time_slot")
+        c.execute("SELECT * FROM tasks ORDER BY task_date,created_at")
     rows = [dict(r) for r in c.fetchall()]; conn.close(); return rows
 
-def add_task(title, description, time_slot, assigned_to, task_date, duration_minutes=0):
+def add_task(title, description, assigned_to, task_date, duration_minutes=0):
     conn = get_connection(); c = conn.cursor()
     c.execute("INSERT INTO tasks (title,description,time_slot,assigned_to,task_date,created_at,duration_minutes) VALUES (?,?,?,?,?,?,?)",
-              (title, description, time_slot, assigned_to, task_date,
+              (title, description, "", assigned_to, task_date,
                datetime.now().strftime("%Y-%m-%d %H:%M:%S"), duration_minutes))
     conn.commit(); conn.close()
 
@@ -223,7 +247,19 @@ def get_all_completions():
                  ORDER BY tc.completed_at DESC""")
     rows = [dict(r) for r in c.fetchall()]; conn.close(); return rows
 
-# ── الماشية ──
+def get_worker_completion_count(worker_id):
+    conn = get_connection(); c = conn.cursor()
+    c.execute("SELECT COUNT(*) as cnt FROM task_completions WHERE worker_id=?", (worker_id,))
+    row = c.fetchone(); conn.close()
+    return row["cnt"] if row else 0
+
+def get_worker_failure_count(worker_id):
+    conn = get_connection(); c = conn.cursor()
+    c.execute("SELECT COUNT(*) as cnt FROM task_failures WHERE worker_id=?", (worker_id,))
+    row = c.fetchone(); conn.close()
+    return row["cnt"] if row else 0
+
+# ── الماشية (مجموعات) ──
 def get_livestock():
     conn = get_connection(); c = conn.cursor()
     c.execute("SELECT * FROM livestock ORDER BY type")
@@ -243,24 +279,61 @@ def delete_livestock(type_):
     c.execute("DELETE FROM livestock WHERE type=?", (type_,))
     conn.commit(); conn.close()
 
+# ── الماشية (أفراد) ──
+def add_livestock_animal(animal_number, animal_type, age_months, notes=""):
+    conn = get_connection(); c = conn.cursor()
+    try:
+        c.execute("INSERT INTO livestock_animals (animal_number,animal_type,age_months,notes,registered_at) VALUES (?,?,?,?,?)",
+                  (animal_number, animal_type, age_months, notes, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        conn.commit(); return True, "تم تسجيل الرأس بنجاح!"
+    except sqlite3.IntegrityError:
+        return False, "رقم الرأس مستخدم مسبقاً."
+    finally: conn.close()
+
+def get_livestock_animals(animal_type=None):
+    conn = get_connection(); c = conn.cursor()
+    if animal_type:
+        c.execute("SELECT * FROM livestock_animals WHERE animal_type=? ORDER BY animal_number", (animal_type,))
+    else:
+        c.execute("SELECT * FROM livestock_animals ORDER BY animal_type, animal_number")
+    rows = [dict(r) for r in c.fetchall()]; conn.close(); return rows
+
+def update_livestock_animal(animal_id, age_months, notes):
+    conn = get_connection(); c = conn.cursor()
+    c.execute("UPDATE livestock_animals SET age_months=?,notes=? WHERE id=?", (age_months, notes, animal_id))
+    conn.commit(); conn.close()
+
+def delete_livestock_animal(animal_id):
+    conn = get_connection(); c = conn.cursor()
+    c.execute("DELETE FROM livestock_animals WHERE id=?", (animal_id,))
+    conn.commit(); conn.close()
+
+def get_animal_total_consumption(animal):
+    livestock_map = {l["type"]: l for l in get_livestock()}
+    feed_per_head = livestock_map.get(animal["animal_type"], {}).get("feed_per_head", 0)
+    registered = datetime.strptime(animal["registered_at"], "%Y-%m-%d %H:%M:%S")
+    days = max(0, (datetime.now() - registered).days)
+    return feed_per_head * days
+
 # ── المخزن ──
 def get_feed_inventory():
     conn = get_connection(); c = conn.cursor()
     c.execute("SELECT * FROM feed_inventory ORDER BY item_name")
     rows = [dict(r) for r in c.fetchall()]; conn.close(); return rows
 
-def upsert_feed_item(item_name, quantity, unit, low_threshold):
+def upsert_feed_item(item_name, quantity, unit, low_threshold, daily_consumption=0):
     conn = get_connection(); c = conn.cursor()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    c.execute("""INSERT INTO feed_inventory (item_name,quantity,unit,low_threshold,updated_at) VALUES (?,?,?,?,?)
+    c.execute("""INSERT INTO feed_inventory (item_name,quantity,unit,low_threshold,daily_consumption,updated_at) VALUES (?,?,?,?,?,?)
                  ON CONFLICT(item_name) DO UPDATE SET quantity=excluded.quantity,
-                 unit=excluded.unit,low_threshold=excluded.low_threshold,updated_at=excluded.updated_at""",
-              (item_name, quantity, unit, low_threshold, now))
+                 unit=excluded.unit,low_threshold=excluded.low_threshold,
+                 daily_consumption=excluded.daily_consumption,updated_at=excluded.updated_at""",
+              (item_name, quantity, unit, low_threshold, daily_consumption, now))
     conn.commit(); conn.close()
 
 def add_to_feed_stock(item_name, amount):
     conn = get_connection(); c = conn.cursor()
-    c.execute("UPDATE feed_inventory SET quantity=quantity+?, updated_at=? WHERE item_name=?",
+    c.execute("UPDATE feed_inventory SET quantity=MAX(0,quantity+?), updated_at=? WHERE item_name=?",
               (amount, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), item_name))
     conn.commit(); conn.close()
 
@@ -273,6 +346,21 @@ def get_low_stock_items():
     conn = get_connection(); c = conn.cursor()
     c.execute("SELECT * FROM feed_inventory WHERE quantity <= low_threshold")
     rows = [dict(r) for r in c.fetchall()]; conn.close(); return rows
+
+def auto_deduct_daily_inventory():
+    today = datetime.now().strftime("%Y-%m-%d")
+    last = get_setting("last_inventory_deduction", "")
+    if last == today:
+        return False
+    inventory = get_feed_inventory()
+    deducted = False
+    for item in inventory:
+        dc = item.get("daily_consumption", 0)
+        if dc and dc > 0:
+            add_to_feed_stock(item["item_name"], -dc)
+            deducted = True
+    set_setting("last_inventory_deduction", today)
+    return deducted
 
 # ── المالية ──
 def add_finance_entry(entry_date, description, amount, entry_type="manual"):
@@ -299,15 +387,20 @@ def auto_add_feed_cost(entry_date):
     conn.close()
     livestock = get_livestock()
     if not livestock: return
-    total = sum(l["count"] * l["feed_per_head"] for l in livestock)
-    if total > 0:
-        heads = sum(l["count"] for l in livestock)
-        add_finance_entry(entry_date, f"تكلفة العلف اليومي — {heads} رأس", total, "auto_feed")
+    for l in livestock:
+        cost = l["count"] * l["feed_per_head"]
+        if cost > 0:
+            add_finance_entry(entry_date, f"تكلفة علف {l['type']} — {l['count']} رأس × {l['feed_per_head']:.2f} د", cost, "auto_feed")
 
 # ─────────────────────────────────────────────
 #  إعداد التطبيق
 # ─────────────────────────────────────────────
 init_db()
+
+# خصم المخزون اليومي عند بدء التشغيل
+if "inventory_deducted" not in st.session_state:
+    auto_deduct_daily_inventory()
+    st.session_state["inventory_deducted"] = True
 
 st.set_page_config(
     page_title="مزرعة الشاوية",
@@ -320,10 +413,11 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800;900&display=swap');
 html, body, [class*="css"] { font-family: 'Tajawal', sans-serif !important; direction: rtl; text-align: right; }
-body { background: #0a1a10 !important; }
+html { overscroll-behavior: none !important; }
+body { background: #0a1a10 !important; overscroll-behavior: none !important; overscroll-behavior-y: none !important; touch-action: pan-y; }
 [data-testid="stAppViewContainer"] { background: linear-gradient(160deg, #0a1a10 0%, #0d2b1e 50%, #0a1a10 100%); min-height: 100vh; }
-[data-testid="stHeader"] { background: transparent !important; }
-[data-testid="stApp"] { animation: appFadeIn 0.4s ease-in; }
+[data-testid="stHeader"] { background: transparent !important; display: none !important; }
+[data-testid="stApp"] { opacity: 0; animation: appFadeIn 0.35s ease-out 0.08s both; }
 @keyframes appFadeIn { from { opacity:0; } to { opacity:1; } }
 #MainMenu { display: none !important; }
 [data-testid="stToolbar"] { display: none !important; }
@@ -394,21 +488,17 @@ div[data-testid="stForm"] { background:transparent !important; border:none !impo
 .task-card { background:rgba(255,255,255,0.04); border:1.5px solid rgba(255,255,255,0.1); border-radius:18px; padding:20px 22px; margin-bottom:14px; transition:transform 0.2s,box-shadow 0.2s; animation:cardIn 0.5s cubic-bezier(0.16,1,0.3,1) both; }
 .task-card:hover { transform:translateY(-3px); box-shadow:0 8px 28px rgba(0,0,0,0.3); }
 .task-card-done { background:rgba(82,183,136,0.08) !important; border-color:rgba(82,183,136,0.4) !important; }
-.task-card-now  { background:rgba(230,126,34,0.08) !important; border-color:rgba(230,126,34,0.5) !important; box-shadow:0 0 20px rgba(230,126,34,0.15) !important; animation:cardIn 0.5s cubic-bezier(0.16,1,0.3,1) both,nowPulse 3s ease-in-out infinite !important; }
 .task-card-fail { background:rgba(239,68,68,0.06) !important; border-color:rgba(239,68,68,0.3) !important; }
-@keyframes nowPulse { 0%,100%{box-shadow:0 0 20px rgba(230,126,34,0.15);} 50%{box-shadow:0 0 32px rgba(230,126,34,0.35);} }
 @keyframes cardIn { from{opacity:0;transform:translateY(16px);} to{opacity:1;transform:translateY(0);} }
 @keyframes heroIn { from{opacity:0;transform:translateY(-20px);} to{opacity:1;transform:translateY(0);} }
 @keyframes float { 0%,100%{transform:translateY(0);} 50%{transform:translateY(-10px);} }
 @keyframes shimmer { from{background-position:0% center;} to{background-position:200% center;} }
 
 .task-title-text { color:#fff; font-size:1.08rem; font-weight:800; }
-.task-time-text  { color:#52b788; font-size:0.9rem; font-weight:600; margin-top:4px; }
 .task-desc-text  { color:rgba(255,255,255,0.65); font-size:0.92rem; line-height:1.6; margin-top:8px; }
 .task-desc-done  { color:rgba(255,255,255,0.3); text-decoration:line-through; font-size:0.92rem; margin-top:8px; }
 .badge { display:inline-block; border-radius:20px; padding:4px 14px; font-size:0.8rem; font-weight:800; }
 .badge-done { background:rgba(82,183,136,0.2); color:#52b788; border:1px solid rgba(82,183,136,0.4); }
-.badge-now  { background:rgba(230,126,34,0.2); color:#f0a500; border:1px solid rgba(230,126,34,0.4); }
 .badge-fail { background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); }
 .countdown-bar { background:rgba(255,255,255,0.08); border-radius:50px; height:6px; overflow:hidden; margin:8px 0 4px; }
 .countdown-fill { height:100%; border-radius:50px; transition:width 0.5s; }
@@ -425,7 +515,6 @@ div[data-testid="stForm"] { background:transparent !important; border:none !impo
 .hero-header { background:linear-gradient(135deg,rgba(26,71,49,0.95),rgba(45,106,79,0.85),rgba(82,183,136,0.4)); border:1px solid rgba(82,183,136,0.3); border-radius:24px; padding:28px 32px; margin-bottom:24px; backdrop-filter:blur(16px); box-shadow:0 8px 40px rgba(0,0,0,0.4); overflow:hidden; animation:heroIn 0.7s cubic-bezier(0.16,1,0.3,1) both; }
 .worker-name { color:#fff; font-size:1.9rem; font-weight:900; margin-bottom:4px; }
 .worker-sub  { color:#74c69d; font-size:1rem; margin-bottom:10px; }
-.live-clock  { background:rgba(255,255,255,0.12); border:1px solid rgba(82,183,136,0.25); border-radius:14px; padding:10px 20px; color:#fff; font-size:1.15rem; font-weight:800; letter-spacing:1px; backdrop-filter:blur(8px); }
 
 .login-hero { text-align:center; padding:40px 20px 16px; animation:heroIn 0.8s cubic-bezier(0.16,1,0.3,1) both; }
 .farm-logo  { display:block; margin:0 auto 16px; filter:drop-shadow(0 8px 28px rgba(82,183,136,0.45)); animation:float 4s ease-in-out infinite; }
@@ -439,6 +528,13 @@ div[data-testid="stForm"] { background:transparent !important; border:none !impo
 .livestock-icon { font-size:2.5rem; margin-bottom:8px; }
 .livestock-type { color:#fff; font-size:1.2rem; font-weight:900; }
 .livestock-count { color:#52b788; font-size:2rem; font-weight:900; }
+
+.animal-card { background:rgba(255,255,255,0.04); border:1.5px solid rgba(82,183,136,0.18); border-radius:16px; padding:16px 18px; margin-bottom:10px; }
+.animal-num { color:#f6d860; font-size:1rem; font-weight:900; }
+.animal-type-badge { display:inline-block; background:rgba(82,183,136,0.15); color:#52b788; border:1px solid rgba(82,183,136,0.3); border-radius:10px; padding:2px 10px; font-size:0.82rem; font-weight:700; margin-right:8px; }
+.animal-detail { color:rgba(255,255,255,0.6); font-size:0.88rem; margin-top:4px; }
+.animal-consumption { color:#74c69d; font-weight:800; font-size:1rem; }
+
 .finance-row { display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.04); border:1px solid rgba(82,183,136,0.1); border-radius:12px; padding:12px 16px; margin-bottom:8px; }
 .finance-desc { color:rgba(255,255,255,0.8); font-size:0.95rem; }
 .finance-amount { color:#52b788; font-weight:800; font-size:1.05rem; }
@@ -454,30 +550,13 @@ div[data-testid="stForm"] { background:transparent !important; border:none !impo
 .info-label { color:#74c69d; font-size:0.85rem; font-weight:700; min-width:100px; }
 .info-val { color:#fff; font-size:0.95rem; }
 .pass-val { color:#f6d860; font-family:monospace; font-size:0.9rem; background:rgba(246,216,96,0.08); border-radius:8px; padding:2px 10px; }
+.worker-stats-bar { display:flex; gap:10px; margin-bottom:18px; flex-wrap:wrap; }
+.wstat-card { flex:1; min-width:100px; background:rgba(255,255,255,0.05); border:1px solid rgba(82,183,136,0.2); border-radius:16px; padding:14px 10px; text-align:center; }
+.wstat-num { font-size:1.8rem; font-weight:900; }
+.wstat-label { font-size:0.8rem; color:rgba(255,255,255,0.45); margin-top:2px; }
 .footer-text { text-align:center; color:rgba(116,198,157,0.4); font-size:0.8rem; margin-top:28px; padding-bottom:20px; }
 </style>
 """, unsafe_allow_html=True)
-
-# ── مانع رمز Streamlit ──
-components.html("""<script>
-(function(){
-  var SELECTORS=[
-    '[data-testid="stToolbar"]','[data-testid="stDecoration"]',
-    '[data-testid="stStatusWidget"]','[data-testid="manage-app-button"]',
-    '#MainMenu','.viewerBadge_container__1QSob','.viewerBadge_link__qRIco',
-    'a[href*="streamlit.io"]','img[alt="Streamlit"]','button[title="Deploy"]'
-  ];
-  function hide(){
-    var doc=window.parent.document;
-    SELECTORS.forEach(function(s){
-      doc.querySelectorAll(s).forEach(function(el){el.style.setProperty('display','none','important');});
-    });
-  }
-  hide();
-  var obs=new MutationObserver(hide);
-  obs.observe(window.parent.document.body,{childList:true,subtree:true});
-})();
-</script>""", height=0)
 
 # ─────────────────────────────────────────────
 #  ساعة العامل
@@ -486,12 +565,12 @@ def worker_hero_clock():
     _tz = timezone(timedelta(hours=1))
     _now = datetime.now(_tz)
     _h = _now.hour
-    if 5 <= _h < 12: _gr, _pr = "صباح الخير", "صباحاً"
-    elif 12 <= _h < 20: _gr, _pr = "مساء الخير", "مساءً"
-    else: _gr, _pr = "مساء النور", "مساءً"
+    if 5 <= _h < 12: _gr = "صباح الخير"
+    elif 12 <= _h < 20: _gr = "مساء الخير"
+    else: _gr = "مساء النور"
     _first_name = st.session_state.get("clock_first_name", "")
     _medals_section = st.session_state.get("clock_medals_section", "")
-    st.markdown(f'<div class="hero-header"><div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;"><div><div class="worker-name">{_gr}، {_first_name}</div><div class="worker-sub">مرحباً بك في لوحة مهامك — {_pr}</div>{_medals_section}</div><div id="js-clock-wrap"></div></div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="hero-header"><div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;"><div><div class="worker-name">{_gr}، {_first_name}</div><div class="worker-sub">مرحباً بك في لوحة مهامك</div>{_medals_section}</div><div id="js-clock-wrap"></div></div></div>', unsafe_allow_html=True)
     components.html("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@800&display=swap');
@@ -623,7 +702,6 @@ def page_login():
 #  لوحة تحكم المدير
 # ─────────────────────────────────────────────
 def page_admin():
-    # تنبيه المخزن المنخفض
     low_items = get_low_stock_items()
     if low_items:
         for item in low_items:
@@ -658,12 +736,16 @@ def page_admin():
                 status    = w["status"]
                 status_ar = {"pending":"قيد المراجعة","approved":"مقبول","rejected":"مرفوض"}.get(status, status)
                 pill      = {"pending":"pill-pending","approved":"pill-approved","rejected":"pill-rejected"}.get(status,"")
-                with st.expander(f"{w['name']} — {w['applied_at'][:10]}"):
+                done_c  = get_worker_completion_count(w["id"])
+                fail_c  = get_worker_failure_count(w["id"])
+                with st.expander(f"{w['name']} — {w['applied_at'][:10]} | ✅ {done_c} منجز | ❌ {fail_c} فشل"):
                     st.markdown(f'<div class="info-row"><span class="info-label">الاسم</span><span class="info-val">{w["name"]}</span></div>', unsafe_allow_html=True)
                     st.markdown(f'<div class="info-row"><span class="info-label">الهاتف</span><span class="info-val">{w["phone"]}</span></div>', unsafe_allow_html=True)
                     st.markdown(f'<div class="info-row"><span class="info-label">كلمة المرور</span><span class="pass-val">{w.get("raw_password") or "—"}</span></div>', unsafe_allow_html=True)
                     st.markdown(f'<div class="info-row"><span class="info-label">الخبرة</span><span class="info-val">{w["experience_years"]} سنة</span></div>', unsafe_allow_html=True)
                     st.markdown(f'<div class="info-row"><span class="info-label">المهارات</span><span class="info-val">{w["skills"]}</span></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="info-row"><span class="info-label">المهام المنجزة</span><span class="info-val" style="color:#52b788;font-weight:800;">{done_c}</span></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="info-row"><span class="info-label">المهام الفاشلة</span><span class="info-val" style="color:#f87171;font-weight:800;">{fail_c}</span></div>', unsafe_allow_html=True)
                     st.markdown(f"الحالة: <span class='worker-status-pill {pill}'>{status_ar}</span>", unsafe_allow_html=True)
                     if w.get("notes"): st.info(f"ملاحظات المدير: {w['notes']}")
 
@@ -708,7 +790,7 @@ def page_admin():
                         if st.button("إعادة للمراجعة", key=f"reconsider_{w['id']}", type="secondary"):
                             update_worker_status(w["id"], "pending", ""); st.rerun()
 
-    # ── تبويب 2: المهام ──
+    # ── تبويب 2: المهام (بدون فترة زمنية) ──
     with tab2:
         st.markdown('<div class="section-title">إضافة مهمة جديدة</div>', unsafe_allow_html=True)
         with st.form("add_task_form", clear_on_submit=True):
@@ -716,24 +798,23 @@ def page_admin():
             with c1: task_title = st.text_input("عنوان المهمة *", placeholder="مثال: رعي الأغنام صباحاً")
             with c2: task_date  = st.date_input("تاريخ المهمة *", value=date.today())
             task_desc = st.text_area("الوصف *", placeholder="اشرح ما يجب على العمال فعله...")
-            c3, c4, c5 = st.columns(3)
-            with c3: time_slot = st.text_input("الفترة الزمنية *", placeholder="مثال: 06:00 - 08:00 ص")
-            with c4:
+            c3, c4 = st.columns(2)
+            with c3:
                 approved_ws   = [w for w in get_all_workers() if w["status"] == "approved"]
                 assign_opts   = {"جميع العمال": "all"}
                 for w in approved_ws: assign_opts[w["name"]] = str(w["id"])
                 assigned_label = st.selectbox("تعيين إلى *", list(assign_opts.keys()))
-            with c5: duration_min = st.number_input("مدة التنفيذ (دقيقة)", min_value=0, max_value=480, value=0, step=15, help="0 = بدون عداد")
+            with c4:
+                duration_min = st.number_input("مدة التنفيذ (دقيقة)", min_value=0, max_value=480, value=0, step=15, help="0 = بدون عداد")
             task_submitted = st.form_submit_button("إضافة المهمة", use_container_width=True)
             if task_submitted:
                 errs = []
                 if not task_title.strip(): errs.append("عنوان المهمة مطلوب.")
                 if not task_desc.strip():  errs.append("وصف المهمة مطلوب.")
-                if not time_slot.strip():  errs.append("الفترة الزمنية مطلوبة.")
                 if errs:
                     for e in errs: st.error(e)
                 else:
-                    add_task(task_title.strip(), task_desc.strip(), time_slot.strip(),
+                    add_task(task_title.strip(), task_desc.strip(),
                              assign_opts[assigned_label], str(task_date), int(duration_min))
                     st.success(f"تمت إضافة المهمة '{task_title}' بنجاح!"); st.rerun()
 
@@ -749,10 +830,9 @@ def page_admin():
                 completions = get_completions_for_task(task["id"])
                 dur_txt = f" | {task['duration_minutes']} د" if task.get("duration_minutes") else ""
                 done_badge = f"{len(completions)} أنجزوا" if completions else "لم ينجز أحد"
-                with st.expander(f"{task['title']} — {task['time_slot']}{dur_txt} | {task['task_date']} | {done_badge}"):
+                with st.expander(f"{task['title']}{dur_txt} | {task['task_date']} | {done_badge}"):
                     ct1, ct2 = st.columns(2)
                     with ct1:
-                        st.markdown(f"**الفترة:** {task['time_slot']}")
                         st.markdown(f"**التاريخ:** {task['task_date']}")
                         if task.get("duration_minutes"): st.markdown(f"**المدة:** {task['duration_minutes']} دقيقة")
                     with ct2:
@@ -787,12 +867,13 @@ def page_admin():
                 failures    = get_worker_failures(w["id"])
                 done_count  = len(worker_done)
                 pct         = int(done_count / total_tasks * 100) if total_tasks > 0 else 0
-                with st.expander(f"{w['name']} — {done_count}/{total_tasks} مهمة ({pct}%) | فشل: {len(failures)}"):
+                with st.expander(f"{w['name']} — ✅ {done_count} منجز | ❌ {len(failures)} فشل | {pct}٪"):
                     st.markdown(f'<div class="completion-bar-wrap"><div class="completion-bar-fill" style="width:{pct}%;"></div></div><div style="color:#74c69d;font-size:0.85rem;font-weight:700;">{pct}٪ منجز</div>', unsafe_allow_html=True)
                     if done_count > 0:
+                        st.markdown("**المهام المنجزة:**")
                         for title, at in worker_done: st.markdown(f"- **{title}** — {at}")
                     if failures:
-                        st.markdown("**مهام منتهية الوقت:**")
+                        st.markdown("**مهام لم تُنجز:**")
                         for f in failures: st.markdown(f"- ~~{f['task_title']}~~ — {f['failed_at'][:16]}")
             st.markdown("<br>", unsafe_allow_html=True)
             st.markdown('<div class="section-title">إنجاز كل مهمة</div>', unsafe_allow_html=True)
@@ -804,13 +885,14 @@ def page_admin():
                 done_names  = [c["name"] for c in completions]
                 asgn        = task["assigned_to"]
                 eligible    = all_workers_approved if asgn == "all" else ([get_worker_by_id(int(asgn))] if get_worker_by_id(int(asgn)) else [])
+                eligible    = [e for e in eligible if e]
                 total_el    = len(eligible)
                 done_c      = len(done_names)
                 pct         = int(done_c / total_el * 100) if total_el > 0 else 0
                 label       = "مكتملة" if done_c == total_el and total_el > 0 else ("جارية" if done_c > 0 else "معلقة")
                 with st.expander(f"{task['title']} — {done_c}/{total_el} ({pct}%) — {label}"):
                     st.markdown(f'<div class="completion-bar-wrap"><div class="completion-bar-fill" style="width:{pct}%;"></div></div>', unsafe_allow_html=True)
-                    st.markdown(f"**{task['time_slot']}** | **{task['task_date']}**")
+                    st.markdown(f"**{task['task_date']}**")
                     if done_names:
                         st.markdown("**أنجزوا:**")
                         for name in done_names:
@@ -823,37 +905,100 @@ def page_admin():
 
     # ── تبويب 4: الماشية ──
     with tab4:
-        st.markdown('<div class="section-title">إدارة الماشية</div>', unsafe_allow_html=True)
-        livestock_types = {"دجاج": "🐔", "غنم": "🐑", "بقر": "🐄"}
+        livestock_icons = {"دجاج": "🐔", "غنم": "🐑", "بقر": "🐄"}
+
+        # قسم 1: ملخص الأنواع
+        st.markdown('<div class="section-title">ملخص أنواع الماشية</div>', unsafe_allow_html=True)
         livestock_data  = {l["type"]: l for l in get_livestock()}
         total_feed_day  = sum(l["count"] * l["feed_per_head"] for l in livestock_data.values())
 
-        cols = st.columns(3)
-        for idx, (ltype, icon) in enumerate(livestock_types.items()):
-            data = livestock_data.get(ltype, {})
-            cnt  = data.get("count", 0)
-            fpd  = data.get("feed_per_head", 0)
-            with cols[idx]:
-                st.markdown(f'<div class="livestock-card"><div class="livestock-icon">{icon}</div><div class="livestock-type">{ltype}</div><div class="livestock-count">{cnt} رأس</div><div style="color:rgba(255,255,255,0.5);font-size:0.85rem;margin-top:4px;">علف: {fpd} درهم/رأس/يوم</div></div>', unsafe_allow_html=True)
+        if livestock_data:
+            cols = st.columns(min(len(livestock_data), 3))
+            for idx, (ltype, data) in enumerate(livestock_data.items()):
+                cnt = data.get("count", 0)
+                fpd = data.get("feed_per_head", 0)
+                icon = livestock_icons.get(ltype, "🐾")
+                with cols[idx % 3]:
+                    st.markdown(f'<div class="livestock-card"><div class="livestock-icon">{icon}</div><div class="livestock-type">{ltype}</div><div class="livestock-count">{cnt} رأس</div><div style="color:rgba(255,255,255,0.5);font-size:0.85rem;margin-top:4px;">علف: {fpd} درهم/رأس/يوم</div><div style="color:#52b788;font-size:0.9rem;font-weight:800;margin-top:4px;">التكلفة اليومية: {cnt*fpd:.2f} د</div></div>', unsafe_allow_html=True)
+            st.metric("إجمالي تكلفة العلف اليومي", f"{total_feed_day:.2f} درهم")
+        else:
+            st.info("لم يُسجَّل أي نوع من الماشية بعد.")
 
-        st.metric("إجمالي تكلفة العلف اليومي", f"{total_feed_day:.2f} درهم")
         st.markdown("<br>", unsafe_allow_html=True)
 
-        selected_type = st.selectbox("اختر نوع الماشية للتعديل", list(livestock_types.keys()))
-        current = livestock_data.get(selected_type, {})
-        with st.form(f"livestock_form_{selected_type}", clear_on_submit=False):
-            lc1, lc2 = st.columns(2)
-            with lc1: new_count = st.number_input("عدد الرؤوس", min_value=0, value=int(current.get("count", 0)), step=1)
-            with lc2: new_feed  = st.number_input("تكلفة العلف/رأس/يوم (درهم)", min_value=0.0, value=float(current.get("feed_per_head", 0)), step=0.5)
-            new_notes = st.text_input("ملاحظات", value=current.get("notes", ""), placeholder="مثال: دواء دوري كل شهر")
-            lbtn1, lbtn2 = st.columns(2)
-            with lbtn1:
-                if st.form_submit_button("حفظ", use_container_width=True, type="primary"):
-                    upsert_livestock(selected_type, new_count, new_feed, new_notes)
-                    st.success(f"تم حفظ بيانات {selected_type}!"); st.rerun()
-            with lbtn2:
-                if st.form_submit_button("حذف", use_container_width=True):
-                    delete_livestock(selected_type); st.rerun()
+        # تعديل نوع الماشية
+        with st.expander("➕ إضافة / تعديل نوع ماشية"):
+            all_types = list(livestock_icons.keys()) + [t for t in livestock_data if t not in livestock_icons]
+            selected_type = st.selectbox("نوع الماشية", all_types, key="ls_type_sel")
+            current = livestock_data.get(selected_type, {})
+            with st.form(f"livestock_form_{selected_type}", clear_on_submit=False):
+                lc1, lc2 = st.columns(2)
+                with lc1: new_count = st.number_input("عدد الرؤوس", min_value=0, value=int(current.get("count", 0)), step=1)
+                with lc2: new_feed  = st.number_input("تكلفة العلف/رأس/يوم (درهم)", min_value=0.0, value=float(current.get("feed_per_head", 0)), step=0.5)
+                new_notes = st.text_input("ملاحظات", value=current.get("notes", ""), placeholder="مثال: دواء دوري كل شهر")
+                lbtn1, lbtn2 = st.columns(2)
+                with lbtn1:
+                    if st.form_submit_button("حفظ", use_container_width=True, type="primary"):
+                        upsert_livestock(selected_type, new_count, new_feed, new_notes)
+                        st.success(f"تم حفظ بيانات {selected_type}!"); st.rerun()
+                with lbtn2:
+                    if st.form_submit_button("حذف النوع", use_container_width=True):
+                        delete_livestock(selected_type); st.rerun()
+
+        # قسم 2: سجل الأفراد
+        st.markdown('<div class="section-title">سجل الأفراد — بطاقات التعريف</div>', unsafe_allow_html=True)
+
+        with st.expander("➕ تسجيل رأس جديد"):
+            with st.form("add_animal_form", clear_on_submit=True):
+                fa1, fa2 = st.columns(2)
+                with fa1: a_num  = st.text_input("رقم الرأس *", placeholder="مثال: A001")
+                with fa2:
+                    type_options = list(livestock_icons.keys()) + [t for t in livestock_data if t not in livestock_icons]
+                    a_type = st.selectbox("النوع *", type_options, key="add_animal_type")
+                fa3, fa4 = st.columns(2)
+                with fa3: a_age  = st.number_input("العمر (بالأشهر)", min_value=0, value=0, step=1)
+                with fa4: a_note = st.text_input("ملاحظات", placeholder="مثال: بحاجة لتطعيم")
+                if st.form_submit_button("تسجيل الرأس", use_container_width=True, type="primary"):
+                    if not a_num.strip():
+                        st.error("رقم الرأس مطلوب.")
+                    else:
+                        ok, msg = add_livestock_animal(a_num.strip(), a_type, a_age, a_note)
+                        if ok: st.success(msg); st.rerun()
+                        else: st.error(msg)
+
+        animals = get_livestock_animals()
+        if not animals:
+            st.info("لم يُسجَّل أي رأس بعد. أضف الأفراد من الأعلى.")
+        else:
+            livestock_map = {l["type"]: l for l in get_livestock()}
+            filter_type = st.selectbox("تصفية حسب النوع", ["الكل"] + list(set(a["animal_type"] for a in animals)), key="animal_filter")
+            filtered = animals if filter_type == "الكل" else [a for a in animals if a["animal_type"] == filter_type]
+            st.markdown(f'<div style="color:rgba(255,255,255,0.4);font-size:0.85rem;margin-bottom:12px;">إجمالي: {len(filtered)} رأس</div>', unsafe_allow_html=True)
+
+            for animal in filtered:
+                feed_per_head = livestock_map.get(animal["animal_type"], {}).get("feed_per_head", 0)
+                registered = datetime.strptime(animal["registered_at"], "%Y-%m-%d %H:%M:%S")
+                days_since = max(0, (datetime.now() - registered).days)
+                total_consumed = feed_per_head * days_since
+                icon = livestock_icons.get(animal["animal_type"], "🐾")
+
+                with st.expander(f"{icon} رقم {animal['animal_number']} — {animal['animal_type']} — عمره {animal['age_months']} شهراً"):
+                    bc1, bc2 = st.columns(2)
+                    with bc1:
+                        notes_html = f'<div class="animal-detail" style="margin-top:6px;">ملاحظات: {animal["notes"]}</div>' if animal["notes"] else ""
+                        st.markdown(f'<div class="animal-card"><div class="animal-num">🏷 رقم التعريف: {animal["animal_number"]}</div><span class="animal-type-badge">{animal["animal_type"]}</span><div class="animal-detail">العمر: {animal["age_months"]} شهراً</div><div class="animal-detail">تاريخ التسجيل: {animal["registered_at"][:10]}</div><div class="animal-detail">أيام منذ التسجيل: {days_since} يوم</div><div class="animal-consumption">الاستهلاك الكلي: {total_consumed:.2f} درهم</div>{notes_html}</div>', unsafe_allow_html=True)
+                    with bc2:
+                        with st.form(f"edit_animal_{animal['id']}", clear_on_submit=False):
+                            new_age  = st.number_input("تحديث العمر (أشهر)", min_value=0, value=int(animal["age_months"]), step=1, key=f"age_{animal['id']}")
+                            new_note = st.text_input("تحديث الملاحظات", value=animal["notes"] or "", key=f"note_{animal['id']}")
+                            col_s, col_d = st.columns(2)
+                            with col_s:
+                                if st.form_submit_button("حفظ", use_container_width=True, type="primary"):
+                                    update_livestock_animal(animal["id"], new_age, new_note)
+                                    st.success("تم التحديث!"); st.rerun()
+                            with col_d:
+                                if st.form_submit_button("حذف", use_container_width=True):
+                                    delete_livestock_animal(animal["id"]); st.rerun()
 
     # ── تبويب 5: التقرير المالي ──
     with tab5:
@@ -861,10 +1006,9 @@ def page_admin():
         report_date = st.date_input("تاريخ التقرير", value=date.today(), key="finance_date")
         report_date_str = str(report_date)
 
-        # إضافة تكلفة العلف تلقائياً
-        if st.button("إضافة تكلفة العلف تلقائياً", key="auto_feed_btn"):
+        if st.button("إضافة تكلفة العلف لكل نوع تلقائياً", key="auto_feed_btn"):
             auto_add_feed_cost(report_date_str)
-            st.success("تم إضافة تكلفة العلف!"); st.rerun()
+            st.success("تم إضافة تكلفة العلف لكل نوع!"); st.rerun()
 
         with st.form("add_finance_form", clear_on_submit=True):
             fc1, fc2 = st.columns(2)
@@ -895,21 +1039,25 @@ def page_admin():
     # ── تبويب 6: المخزن ──
     with tab6:
         st.markdown('<div class="section-title">إدارة مخزن العلف</div>', unsafe_allow_html=True)
-        livestock = get_livestock()
-        if livestock:
-            total_daily_consumption = sum(l["count"] * l["feed_per_head"] for l in livestock)
-            st.info(f"الاستهلاك اليومي المتوقع: **{total_daily_consumption:.1f} درهم/يوم** بناءً على {sum(l['count'] for l in livestock)} رأس")
+
+        last_ded = get_setting("last_inventory_deduction", "")
+        today_str_inv = datetime.now().strftime("%Y-%m-%d")
+        if last_ded == today_str_inv:
+            st.markdown(f'<div class="notif-banner"><div class="notif-text">✅ تم خصم الاستهلاك اليومي تلقائياً اليوم ({today_str_inv})</div></div>', unsafe_allow_html=True)
 
         with st.form("add_stock_form", clear_on_submit=True):
-            sc1, sc2, sc3, sc4 = st.columns(4)
+            sc1, sc2 = st.columns(2)
             with sc1: s_name  = st.text_input("اسم الصنف *", placeholder="مثال: شعير")
-            with sc2: s_qty   = st.number_input("الكمية *", min_value=0.0, step=10.0)
+            with sc2: s_qty   = st.number_input("الكمية الحالية *", min_value=0.0, step=10.0)
+            sc3, sc4 = st.columns(2)
             with sc3: s_unit  = st.selectbox("الوحدة", ["كجم","طن","كيس","لتر"])
             with sc4: s_low   = st.number_input("حد التنبيه المنخفض", min_value=0.0, step=5.0, value=50.0)
+            s_daily = st.number_input("الاستهلاك اليومي (يحدده المدير)", min_value=0.0, step=1.0, value=0.0,
+                                      help="الكمية التي تُخصم تلقائياً يومياً من هذا الصنف")
             if st.form_submit_button("إضافة / تحديث صنف", use_container_width=True, type="primary"):
                 if not s_name.strip(): st.error("اسم الصنف مطلوب.")
                 else:
-                    upsert_feed_item(s_name.strip(), s_qty, s_unit, s_low)
+                    upsert_feed_item(s_name.strip(), s_qty, s_unit, s_low, s_daily)
                     st.success("تم حفظ الصنف!"); st.rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -923,7 +1071,9 @@ def page_admin():
                 row_class = "stock-row stock-low" if is_low else "stock-row"
                 pct_stock = min(100, int(item["quantity"] / max(item["low_threshold"] * 2, 1) * 100))
                 bar_color = "#f87171" if is_low else "#52b788"
-                st.markdown(f'<div class="{row_class}"><div class="stock-name">{item["item_name"]}</div><div class="stock-qty">{item["quantity"]:.1f} {item["unit"]}</div>{low_badge}</div><div class="countdown-bar"><div class="countdown-fill" style="width:{pct_stock}%;background:{bar_color};"></div></div>', unsafe_allow_html=True)
+                dc = item.get("daily_consumption", 0)
+                dc_txt = f" | استهلاك يومي: {dc:.1f} {item['unit']}" if dc and dc > 0 else ""
+                st.markdown(f'<div class="{row_class}"><div class="stock-name">{item["item_name"]}{dc_txt}</div><div class="stock-qty">{item["quantity"]:.1f} {item["unit"]}</div>{low_badge}</div><div class="countdown-bar" style="margin-bottom:10px;"><div class="countdown-fill" style="width:{pct_stock}%;background:{bar_color};"></div></div>', unsafe_allow_html=True)
                 sc1, sc2, sc3 = st.columns([2, 2, 1])
                 with sc1:
                     add_qty = st.number_input("إضافة كمية", min_value=0.0, step=10.0, key=f"add_qty_{item['id']}")
@@ -936,16 +1086,19 @@ def page_admin():
                     if st.button("حذف", key=f"del_stock_{item['id']}", type="secondary"):
                         delete_feed_item(item["id"]); st.rerun()
 
-        if st.button("خصم الاستهلاك اليومي الآن", key="consume_daily"):
-            if not livestock:
-                st.warning("لا توجد ماشية مسجّلة.")
-            elif not inventory:
-                st.warning("المخزن فارغ.")
+        if st.button("خصم الاستهلاك اليومي الآن (يدوي)", key="consume_daily"):
+            inventory2 = get_feed_inventory()
+            deducted_any = False
+            for item in inventory2:
+                dc = item.get("daily_consumption", 0)
+                if dc and dc > 0:
+                    add_to_feed_stock(item["item_name"], -dc)
+                    deducted_any = True
+            set_setting("last_inventory_deduction", datetime.now().strftime("%Y-%m-%d"))
+            if deducted_any:
+                st.success("تم خصم الاستهلاك اليومي من جميع الأصناف!"); st.rerun()
             else:
-                total_cons = sum(l["count"] * l["feed_per_head"] for l in livestock)
-                main = inventory[0]
-                add_to_feed_stock(main["item_name"], -total_cons)
-                st.success(f"تم خصم {total_cons:.1f} {main['unit']} من {main['item_name']}"); st.rerun()
+                st.warning("لا توجد أصناف بها استهلاك يومي محدد.")
 
     # ── تبويب 7: الإعدادات ──
     with tab7:
@@ -1001,11 +1154,6 @@ def page_worker():
 
     TZ_PLUS1 = timezone(timedelta(hours=1))
     now  = datetime.now(TZ_PLUS1)
-    hour = now.hour
-
-    if "login_time" not in st.session_state:
-        st.session_state.login_time = now
-    session_minutes = int((now - st.session_state.login_time).total_seconds() // 60)
 
     medals_list    = [m.strip() for m in (worker.get("medals","") or "").split(",") if m.strip()]
     medals_html    = "".join([f'<span class="medal-badge">{m}</span>' for m in medals_list])
@@ -1016,11 +1164,29 @@ def page_worker():
 
     worker_hero_clock()
 
+    # ── إحصاءات العامل ──
+    total_done  = get_worker_completion_count(worker["id"])
+    total_fail  = get_worker_failure_count(worker["id"])
+    today_str   = now.strftime("%Y-%m-%d")
+    today_tasks_all = [t for t in get_tasks(worker_id=worker["id"]) if t["task_date"] == today_str]
+    today_done  = sum(1 for t in today_tasks_all if is_task_done_by_worker(t["id"], worker["id"]))
+
+    if "login_time" not in st.session_state:
+        st.session_state.login_time = now
+    session_minutes = int((now - st.session_state.login_time).total_seconds() // 60)
+
+    st.markdown(f"""
+    <div class="worker-stats-bar">
+      <div class="wstat-card"><div class="wstat-num" style="color:#52b788;">{total_done}</div><div class="wstat-label">إجمالي المنجزة</div></div>
+      <div class="wstat-card"><div class="wstat-num" style="color:#f87171;">{total_fail}</div><div class="wstat-label">إجمالي غير المنجزة</div></div>
+      <div class="wstat-card"><div class="wstat-num" style="color:#f6d860;">{today_done}</div><div class="wstat-label">منجزة اليوم</div></div>
+      <div class="wstat-card"><div class="wstat-num" style="color:rgba(255,255,255,0.5);">{session_minutes}د</div><div class="wstat-label">مدة الجلسة</div></div>
+    </div>
+    """, unsafe_allow_html=True)
+
     # ── تنبيهات المهام ──
-    tasks_all = get_tasks(worker_id=worker["id"])
-    today_str = now.strftime("%Y-%m-%d")
-    today_tasks = [t for t in tasks_all if t["task_date"] == today_str]
-    for t in today_tasks:
+    tasks_all   = get_tasks(worker_id=worker["id"])
+    for t in today_tasks_all:
         if t.get("duration_minutes") and t["duration_minutes"] > 0:
             if not is_task_done_by_worker(t["id"], worker["id"]) and not is_task_failed(t["id"], worker["id"]):
                 created = datetime.strptime(t["created_at"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ_PLUS1)
@@ -1042,16 +1208,7 @@ def page_worker():
 
         if total_today > 0:
             pct = int(done_count / total_today * 100)
-            st.markdown(f'<div style="margin-bottom:24px;"><div style="display:flex;gap:12px;margin-bottom:14px;"><div class="stat-card" style="flex:1;"><div class="stat-num">{total_today}</div><div class="stat-label">مهام اليوم</div></div><div class="stat-card" style="flex:1;"><div class="stat-num" style="color:#52b788;">{done_count}</div><div class="stat-label">تم الإنجاز</div></div><div class="stat-card" style="flex:1;"><div class="stat-num" style="color:#f0a500;">{total_today-done_count}</div><div class="stat-label">متبقية</div></div><div class="stat-card" style="flex:1;"><div class="stat-num" style="color:rgba(255,255,255,0.5);font-size:1.5rem;">{session_minutes}د</div><div class="stat-label">مدة الجلسة</div></div></div><div class="progress-wrap"><div class="progress-fill" style="width:{pct}%;"></div></div><div style="display:flex;justify-content:space-between;color:#74c69d;font-size:0.85rem;font-weight:700;"><span>{pct}٪ منجز</span><span>{done_count} من {total_today}</span></div></div>', unsafe_allow_html=True)
-
-        def parse_task_hour(time_slot):
-            seg = time_slot.split("-")[0].strip()
-            m = re.search(r'(\d{1,2}):(\d{2})', seg)
-            if not m: return None
-            h = int(m.group(1))
-            if "ص" in seg: h = 0 if h == 12 else h
-            elif "م" in seg or "م" in time_slot: h = h + 12 if h < 12 else h
-            return h
+            st.markdown(f'<div style="margin-bottom:16px;"><div class="progress-wrap"><div class="progress-fill" style="width:{pct}%;"></div></div><div style="display:flex;justify-content:space-between;color:#74c69d;font-size:0.85rem;font-weight:700;"><span>{pct}٪ منجز اليوم</span><span>{done_count} من {total_today}</span></div></div>', unsafe_allow_html=True)
 
         day_names   = {"Monday":"الاثنين","Tuesday":"الثلاثاء","Wednesday":"الأربعاء",
                        "Thursday":"الخميس","Friday":"الجمعة","Saturday":"السبت","Sunday":"الأحد"}
@@ -1070,10 +1227,7 @@ def page_worker():
                     with cols[j]:
                         is_done   = is_task_done_by_worker(task["id"], worker["id"])
                         is_failed = is_task_failed(task["id"], worker["id"])
-                        task_hour = parse_task_hour(task["time_slot"])
-                        is_current = task_hour is not None and abs(task_hour - hour) <= 1
 
-                        # عداد تنازلي
                         countdown_html = ""
                         if task.get("duration_minutes") and task["duration_minutes"] > 0 and not is_done and not is_failed:
                             created  = datetime.strptime(task["created_at"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ_PLUS1)
@@ -1084,18 +1238,16 @@ def page_worker():
                             countdown_html = f'<div class="countdown-bar"><div class="countdown-fill" style="width:{pct_time}%;background:{bar_col};"></div></div><div style="color:{bar_col};font-size:0.8rem;font-weight:700;">{int(remaining)} دقيقة متبقية</div>'
 
                         if is_failed:
-                            cc, bh, dh = "task-card task-card-fail", '<span class="badge badge-fail">منتهي الوقت</span>', f'<div class="task-desc-done">{task["description"]}</div>'
+                            cc, bh, dh = "task-card task-card-fail", '<span class="badge badge-fail">لم تُنجز</span>', f'<div class="task-desc-done">{task["description"]}</div>'
                         elif is_done:
-                            cc, bh, dh = "task-card task-card-done", '<span class="badge badge-done">منجزة</span>', f'<div class="task-desc-done">{task["description"]}</div>'
-                        elif is_current:
-                            cc, bh, dh = "task-card task-card-now", '<span class="badge badge-now">جارية الآن</span>', f'<div class="task-desc-text">{task["description"]}</div>'
+                            cc, bh, dh = "task-card task-card-done", '<span class="badge badge-done">منجزة ✓</span>', f'<div class="task-desc-done">{task["description"]}</div>'
                         else:
                             cc, bh, dh = "task-card", "", f'<div class="task-desc-text">{task["description"]}</div>'
 
-                        st.markdown(f'<div class="{cc}"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;"><div class="task-title-text">{task["title"]}</div>{bh}</div><div class="task-time-text">{task["time_slot"]}</div>{dh}{countdown_html}</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="{cc}"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;"><div class="task-title-text">{task["title"]}</div>{bh}</div>{dh}{countdown_html}</div>', unsafe_allow_html=True)
 
                         if not is_done and not is_failed:
-                            if st.button("تحديد كمنجز", key=f"done_{task['id']}_{worker['id']}", use_container_width=True, type="primary"):
+                            if st.button("تحديد كمنجز ✓", key=f"done_{task['id']}_{worker['id']}", use_container_width=True, type="primary"):
                                 mark_task_done(task["id"], worker["id"]); st.rerun()
                         elif is_done:
                             if st.button("إلغاء الإنجاز", key=f"undone_{task['id']}_{worker['id']}", use_container_width=True, type="secondary"):
@@ -1106,8 +1258,9 @@ def page_worker():
         if other_tasks:
             st.markdown('<div class="section-title">المهام القادمة</div>', unsafe_allow_html=True)
             for task in other_tasks:
-                st.markdown(f'<div class="task-card" style="opacity:0.75;"><div style="display:flex;justify-content:space-between;align-items:center;"><div class="task-title-text">{task["title"]}</div><div style="color:rgba(255,255,255,0.35);font-size:0.85rem;">{task["task_date"]}</div></div><div class="task-time-text">{task["time_slot"]}</div><div class="task-desc-text">{task["description"]}</div></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="task-card" style="opacity:0.75;"><div style="display:flex;justify-content:space-between;align-items:center;"><div class="task-title-text">{task["title"]}</div><div style="color:rgba(255,255,255,0.35);font-size:0.85rem;">{task["task_date"]}</div></div><div class="task-desc-text">{task["description"]}</div></div>', unsafe_allow_html=True)
 
+    # ── ترتيب العمال ──
     st.markdown('<div class="section-title">ترتيب العمال اليوم</div>', unsafe_allow_html=True)
     all_workers      = get_all_workers()
     approved_workers = [w for w in all_workers if w["status"] == "approved"]
